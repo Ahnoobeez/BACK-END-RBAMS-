@@ -1,0 +1,72 @@
+﻿@model ClientEntity
+
+
+
+
+<form asp-action="CreateClient" method="post">
+	<br/>
+	<div class="container border p-3">
+		<h1 class="text-primary">New Client Details</h1>
+
+		<hr/>
+		<div class="row">
+			<div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+			<div class="col-2">
+				<label asp-for="Client_Name" class="control-label pt-2" style="font-size:14px;"></label>
+			</div>
+			<div class="col-10 pb-3">
+				<input asp-for="Client_Name" class="form-control">
+				<span asp-validation-for="Client_Name" class="text-danger"></span>
+			</div>
+
+			<div class="col-2">
+				<label asp-for="Client_Telephone" class="control-label pt-2" style="font-size:14px;"></label>
+			</div>
+			<div class="col-10 pb-3">
+				<input asp-for="Client_Telephone" class="form-control">
+				<span asp-validation-for="Client_Telephone" class="text-danger"></span>
+			</div>
+
+			<div class="col-2">
+				<label asp-for="Client_Address" class="control-label pt-2" style="font-size:14px;"></label>
+			</div>
+			<div class="col-10 pb-3">
+				<input asp-for="Client_Address" class="form-control">
+				<span asp-validation-for="Client_Address" class="text-danger"></span>
+			</div>
+
+			<div class="col-2">
+				<label asp-for="TIN" class="control-label pt-2" style="font-size:14px;"></label>
+			</div>
+			<div class="col-10 pb-3">
+				<input asp-for="TIN" class="form-control">
+				<span asp-validation-for="TIN" class="text-danger"></span>
+			</div>
+
+			<div class="col-2">
+				<label asp-for="Payment_Terms" class="control-label pt-2" style="font-size:14px;"></label>
+			</div>
+			<div class="col-10 pb-3">
+				<input asp-for="Payment_Terms" class="form-control">
+				<span asp-validation-for="Payment_Terms" class="text-danger"></span>
+			</div>
+
+
+
+
+			<br/>
+			<div class="col-5 offset-2">
+				<a asp-action="Index" asp-controller="Clients" class="btn btn-primary form-control">Back to Clients</a>
+			</div>
+
+			<div class="col-5">
+				<input type="submit" value="Submit" class="btn btn-success form-control"/>
+			</div>
+			
+		</div>
+
+	</div>
+
+</form>
+

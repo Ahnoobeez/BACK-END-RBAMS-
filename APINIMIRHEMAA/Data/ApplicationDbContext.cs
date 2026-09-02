@@ -1,0 +1,31 @@
+﻿using APINIMIRHEMAA.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace APINIMIRHEMAA.Data
+{
+    public class ApplicationDbContext : DbContext
+    {
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
+        {
+
+        }
+        public DbSet<ClientEntity> Clients { get; set; }
+        public DbSet<ClientsProject> ClientsProject { get; set; }
+        public DbSet<Quotation> Quotation { get; set; }
+        public DbSet<Conforme> Conforme { get; set; }
+        public DbSet<JobOrder> JobOrder { get; set; }
+        public DbSet<AuditTrail> AuditTrail { get; set; }
+        public DbSet<CollectionReceipt> CollectionReceipt { get; set; }
+        public DbSet<DeliveryFiles> DeliveryFiles { get; set; }
+        public DbSet<DeliveryReceipt> DeliveryReceipt { get; set; }
+        public DbSet<Graphics> Graphics { get; set; }
+        public DbSet<Installation_Schedule> Installation_Schedule { get; set; }
+        public DbSet<IssuedBy> IssuedBy { get; set; }
+        public DbSet<MaterialRequesition_Slip> MaterailsRequisition_Slip { get; set; }
+        public DbSet<Materials> Materials { get; set; }
+        public DbSet<PurchaseOrder> PurchaseOrder { get; set; }
+        public DbSet<StockTransfer_Slip> StockTransfer_Slip { get; set; }
+        public DbSet<Transmittal_Slip> Transmittal_Slip { get; set; }
+        public DbSet<ServiceInvoice> ServiceInvoice { get; set; }
+    }
+}

@@ -1,0 +1,6 @@
+@APINIMIRHEMAA_HostAddress = http://localhost:5073
+
+GET {{APINIMIRHEMAA_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
