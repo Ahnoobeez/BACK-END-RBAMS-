@@ -1,0 +1,248 @@
+<!-- ================= TABS ================= -->
+
+<div class="tab-nav">
+
+    <a href="#" class="tab-link active"
+        onclick="switchTab(event,'inventoryMasterSection')">
+        Inventory Master
+    </a>
+
+    <a href="#" class="tab-link"
+        onclick="switchTab(event,'wasteMonitoringSection')">
+        Waste Monitoring
+    </a>
+
+    <a href="#" class="tab-link"
+        onclick="switchTab(event,'savedRecordSection')">
+        Saved Records
+    </a>
+
+</div>
+
+<!-- ================= INVENTORY MASTER ================= -->
+
+<div id="inventoryMasterSection" class="tab-content active-content">
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <button class="btn btn-primary">+ Add Stock</button>
+        <button class="btn btn-secondary">Update Quantities</button>
+        <button class="btn btn-secondary">Supplier Management</button>
+        <button class="btn btn-text">💾 Save</button>
+    </div>
+
+    <!-- ================= STOCK LEVELS ================= -->
+
+    <div class="form-section">
+
+        <h3 class="section-title">
+            Stock Levels & Buffer Monitoring
+        </h3>
+
+        <div class="form-row">
+
+            <div class="form-group">
+                <label>Item Code</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Item Name</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Current Quantity</label>
+                <input type="number" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Minimum Buffer Level</label>
+                <input type="number" class="form-control">
+            </div>
+
+        </div>
+
+        <div class="form-row">
+
+            <div class="form-group">
+                <label>Category</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Supplier</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Payment Terms</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Reorder Alert Status</label>
+                <input type="text" class="form-control">
+            </div>
+
+        </div>
+
+        <div class="form-row full">
+
+            <div class="form-group">
+                <label>Seasonal Stock Level Suggestions (AI Generated)</label>
+                <textarea class="form-control" rows="5"></textarea>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- ================= STOCK TRANSFER ================= -->
+
+    <div class="form-section">
+
+        <h3 class="section-title">
+            Stock Transfer / Material Requisition Processing
+        </h3>
+
+        <div class="form-row">
+
+            <div class="form-group">
+                <label>Control Number</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>From Location / Department</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>To Location / Department</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Quantity Transferred</label>
+                <input type="number" class="form-control">
+            </div>
+
+        </div>
+
+        <div class="form-row">
+
+            <div class="form-group">
+                <label>Status</label>
+                <input type="text" class="form-control">
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+    <!-- ================= WASTE MONITORING ================= -->
+
+<div id="wasteMonitoringSection" class="tab-content">
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <button class="btn btn-primary">
+            📊 Generate Waste Report
+        </button>
+
+        <button class="btn btn-secondary">
+            Recalculate Constraints
+        </button>
+    </div>
+
+    <!-- Waste Monitoring Card -->
+    <div class="form-section">
+
+        <h3 class="section-title">
+            Resource Consumption & Operational Waste
+        </h3>
+
+        <!-- Row 1 -->
+        <div class="form-row">
+
+            <div class="form-group">
+                <label>Project ID</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Materials Allocated</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Materials Actually Used</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Variance (Waste)</label>
+                <input type="text" class="form-control">
+            </div>
+
+        </div>
+
+        <!-- Row 2 -->
+        <div class="form-row">
+
+            <div class="form-group">
+                <label>Raw Material Cost</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Waste Cost Value</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Efficiency Rating</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Monitored By</label>
+                <input type="text" class="form-control">
+            </div>
+
+        </div>
+
+        <!-- Row 3 -->
+        <div class="form-row full">
+
+            <div class="form-group">
+                <label>Waste Reduction Strategies & Remarks</label>
+                <textarea class="form-control" rows="5"></textarea>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+
+<!-- ================= SAVED RECORDS ================= -->
+
+<div id="savedRecordSection" class="tab-content">
+
+    <div class="form-section">
+
+        <h3 class="section-title">
+            Saved Records
+        </h3>
+
+        <p>Saved records will appear here.</p>
+
+    </div>
+
+</div>

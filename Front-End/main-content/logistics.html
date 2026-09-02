@@ -1,0 +1,116 @@
+<!-- =========================
+     Tabs
+========================= -->
+<div class="tab-nav">
+
+    <a href="#" class="tab-link active"
+       onclick="switchTab(event,'installationReportsSection')">
+        Installation Reports
+    </a>
+
+    <a href="#" class="tab-link"
+       onclick="switchTab(event,'deliveryTransmittalsSection')">
+        Delivery &amp; Transmittals
+    </a>
+
+    <a href="#" class="tab-link"
+       onclick="switchTab(event,'savedRecordsSection')">
+        📄 Saved Records
+    </a>
+
+</div>
+
+<!-- =========================
+     INSTALLATION REPORTS
+========================= -->
+<div id="installationReportsSection" class="tab-content active">
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <button class="btn btn-primary">+ New Report</button>
+        <button class="btn btn-secondary">💾 Save Report</button>
+    </div>
+
+    <!-- Installation Report Form -->
+    <div class="form-section">
+
+        <h3 class="section-title">Installation Report Form</h3>
+
+        <!-- Row 1 -->
+        <div class="form-row">
+
+            <div class="form-group">
+                <label>Report ID</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Job Order ID</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Date</label>
+                <input type="date" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Location</label>
+                <input type="text" class="form-control">
+            </div>
+
+        </div>
+
+        <!-- Row 2 -->
+        <div class="form-row">
+
+            <div class="form-group">
+                <label>Time Started</label>
+                <input type="time" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Time End</label>
+                <input type="time" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Installers Assigned</label>
+                <input type="text" class="form-control">
+            </div>
+
+            <div class="form-group">
+                <label>Status</label>
+                <input type="text" class="form-control">
+            </div>
+
+        </div>
+
+        <!-- Installation Report -->
+        <div class="form-row full">
+            <div class="form-group">
+                <label>Installation Report Details</label>
+                <textarea class="form-control"></textarea>
+            </div>
+        </div>
+
+        <!-- Action Taken -->
+        <div class="form-row full">
+            <div class="form-group">
+                <label>Action Taken</label>
+                <textarea class="form-control"></textarea>
+            </div>
+        </div>
+
+        <!-- Client Remarks -->
+        <div class="form-row full">
+            <div class="form-group">
+                <label>Client Remarks</label>
+                <textarea class="form-control"></textarea>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
