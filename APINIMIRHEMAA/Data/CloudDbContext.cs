@@ -1,11 +1,11 @@
-﻿using APINIMIRHEMAA.Models;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
+using APINIMIRHEMAA.Models;
 
 namespace APINIMIRHEMAA.Data
 {
-    public class ApplicationDbContext : DbContext
+    public class CloudDbContext : DbContext
     {
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
+        public CloudDbContext(DbContextOptions<CloudDbContext> options) : base(options)
         {
 
         }

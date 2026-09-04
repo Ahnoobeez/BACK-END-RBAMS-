@@ -9,9 +9,9 @@ namespace APINIMIRHEMAA.Controllers
     [ApiController]
     public class MarketingController : ControllerBase
     {
-        private ApplicationDbContext _db;
+        private LocalDbContext _db;
         
-        public MarketingController(ApplicationDbContext context)
+        public MarketingController(LocalDbContext context)
         {
             _db = context;
         }

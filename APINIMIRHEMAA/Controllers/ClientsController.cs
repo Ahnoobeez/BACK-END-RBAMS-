@@ -9,17 +9,25 @@ namespace APINIMIRHEMAA.Controllers
     [ApiController]
     public class ClientsController : ControllerBase
     {
-        private ApplicationDbContext _db;
+        private LocalDbContext _Localdb;
+        private CloudDbContext _Clouddb;
 
-        public ClientsController(ApplicationDbContext context)
+        public ClientsController(LocalDbContext Localcontext, CloudDbContext Cloudcontext)
         {
-            _db = context;
+            _Localdb = Localcontext;
+            _Clouddb = Cloudcontext;
         }
 
         [HttpGet] //Kinukuha lahat ng nasa Database
         public List<ClientEntity> GetAllClients()
         {
-            return _db.Clients.ToList();
+            return _Localdb.Clients.ToList();
+        }
+
+        [HttpGet("CLOUD CLIENTS GET")] //Kinukuha lahat ng nasa Database
+        public List<ClientEntity> GetAllCloudClients()
+        {
+            return _Clouddb.Clients.ToList();
         }
 
         [HttpGet("GetClientsById")] // Kinukuha ang client details base sa ID
@@ -29,7 +37,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var ClientDetails = _db.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var ClientDetails = _Localdb.Clients.FirstOrDefault(x => x.Client_ID == Id);
             if (ClientDetails == null)
             {
                 return NotFound("Client not found.");
@@ -44,8 +52,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
-            _db.Clients.Add(ClientDetails);
-            _db.SaveChanges();
+            _Localdb.Clients.Add(ClientDetails);
+            _Localdb.SaveChanges();
             return Ok(ClientDetails);
         }
 
@@ -57,7 +65,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(ClientDetails);
             }
 
-            var clientDetails = _db.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var clientDetails = _Localdb.Clients.FirstOrDefault(x => x.Client_ID == Id);
             if (clientDetails == null)
             {
                 return NotFound();
@@ -69,7 +77,7 @@ namespace APINIMIRHEMAA.Controllers
             clientDetails.TIN = ClientDetails.TIN;
             clientDetails.Payment_Terms = ClientDetails.Payment_Terms;
 
-            _db.SaveChanges();
+            _Localdb.SaveChanges();
 
 
             return Ok(ClientDetails);
@@ -80,13 +88,13 @@ namespace APINIMIRHEMAA.Controllers
         public ActionResult<ClientEntity> DeleteClient(Int32 Id)
         {
 
-            var clientDetails = _db.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var clientDetails = _Localdb.Clients.FirstOrDefault(x => x.Client_ID == Id);
             if (clientDetails == null)
             {
                 return NotFound();
             }
-            _db.Remove(clientDetails);
-            _db.SaveChanges();
+            _Localdb.Remove(clientDetails);
+            _Localdb.SaveChanges();
 
 
             return NoContent();
@@ -96,31 +104,31 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetAuditTrail")]
         public List<AuditTrail> GetAllAuditTrail()
         {
-            return _db.AuditTrail.ToList();
+            return _Localdb.AuditTrail.ToList();
         }
 
         [HttpGet("GetMaterialRequesitionSlips")]
         public List<MaterialRequesition_Slip> GetAllMaterialRequesitionSlips()
         {
-            return _db.MaterailsRequisition_Slip.ToList();
+            return _Localdb.MaterailsRequisition_Slip.ToList();
         }
 
         [HttpGet("GetMaterials")]
         public List<Materials> GetAllMaterials()
         {
-            return _db.Materials.ToList();
+            return _Localdb.Materials.ToList();
         }
 
         [HttpGet("GetStockTransferSlips")]
         public List<StockTransfer_Slip> GetAllStockTransferSlips()
         {
-            return _db.StockTransfer_Slip.ToList();
+            return _Localdb.StockTransfer_Slip.ToList();
         }
 
         [HttpGet("GetTransmittalSlips")]
         public List<Transmittal_Slip> GetAllTransmittalSlips()
         {
-            return _db.Transmittal_Slip.ToList();
+            return _Localdb.Transmittal_Slip.ToList();
         }
 
     }

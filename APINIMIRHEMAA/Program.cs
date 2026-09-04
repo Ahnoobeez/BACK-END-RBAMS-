@@ -10,8 +10,13 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddDbContext<LocalDbContext>(options =>
+options.UseSqlServer(builder.Configuration.GetConnectionString("LocalDatabase")));
+
+builder.Services.AddDbContext<CloudDbContext>(options =>
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("AzureDatabase")
+));
 
 builder.Services.AddCors(options =>
 {
