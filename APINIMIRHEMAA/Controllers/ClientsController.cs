@@ -18,19 +18,13 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpGet("GetLocalClients")] 
-        public List<ClientEntity> GetAllClients()
+        public List<ClientEntity> GetAllLocalClients()
         {
             return _Localdb.Clients.ToList();
         }
 
-        [HttpGet("CLOUD CLIENTS GET")] //Kinukuha lahat ng nasa Database
-        public List<ClientEntity> GetAllCloudClients()
-        {
-            return _Clouddb.Clients.ToList();
-        }
-
-        [HttpGet("GetClientsById")] // Kinukuha ang client details base sa ID
-        public ActionResult<ClientEntity> GetClientDetails(Int32 Id)
+        [HttpGet("GetLocalClientsById")]
+        public ActionResult<ClientEntity> GetLocalClientDetails(Int32 Id)
         {
             if (Id == 0)
             {
@@ -45,7 +39,7 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost ("AddLocalClients")] 
-        public ActionResult<ClientEntity> AddClient([FromBody] ClientEntity ClientDetails)
+        public ActionResult<ClientEntity> AddLocalClient([FromBody] ClientEntity ClientDetails)
         {
             if (!ModelState.IsValid)
             {
@@ -57,7 +51,7 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("UpdateLocalClientDetails")] 
-        public ActionResult<ClientEntity> UpdateClient(Int32 Id, [FromBody] ClientEntity ClientDetails)
+        public ActionResult<ClientEntity> UpdateLocalClient(Int32 Id, [FromBody] ClientEntity ClientDetails)
         {
             if (ClientDetails == null)
             {
@@ -83,7 +77,7 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPut("DeleteLocalClients")] 
-        public ActionResult<ClientEntity> DeleteClient(Int32 Id)
+        public ActionResult<ClientEntity> DeleteLocalClient(Int32 Id)
         {
 
             var clientDetails = _Localdb.Clients.FirstOrDefault(x => x.Client_ID == Id);
@@ -98,36 +92,81 @@ namespace APINIMIRHEMAA.Controllers
             return NoContent();
         }
 
-
         [HttpGet("GetCloudClients")]
         public List<ClientEntity> GetAllCloudClients()
         {
-            return _Localdb.AuditTrail.ToList();
+            return _Clouddb.Clients.ToList();
         }
 
-        [HttpGet("GetMaterialRequesitionSlips")]
-        public List<MaterialRequesition_Slip> GetAllMaterialRequesitionSlips()
+        [HttpGet("GetCloudClientsById")]
+        public ActionResult<ClientEntity> GetCloudClientDetails(Int32 Id)
         {
-            return _Localdb.MaterailsRequisition_Slip.ToList();
+            if (Id == 0)
+            {
+                return BadRequest("Invalid client ID.");
+            }
+            var ClientDetails = _Clouddb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            if (ClientDetails == null)
+            {
+                return NotFound("Client not found.");
+            }
+            return ClientDetails;
         }
 
-        [HttpGet("GetMaterials")]
-        public List<Materials> GetAllMaterials()
+        [HttpPost("AddCloudClients")]
+        public ActionResult<ClientEntity> AddCloudClient([FromBody] ClientEntity ClientDetails)
         {
-            return _Localdb.Materials.ToList();
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _Clouddb.Clients.Add(ClientDetails);
+            _Clouddb.SaveChanges();
+            return Ok(ClientDetails);
         }
 
-        [HttpGet("GetStockTransferSlips")]
-        public List<StockTransfer_Slip> GetAllStockTransferSlips()
+        [HttpPost("UpdateCloudClientDetails")]
+        public ActionResult<ClientEntity> UpdateCloudClient(Int32 Id, [FromBody] ClientEntity ClientDetails)
         {
-            return _Localdb.StockTransfer_Slip.ToList();
+            if (ClientDetails == null)
+            {
+                return BadRequest(ClientDetails);
+            }
+
+            var clientDetails = _Clouddb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            if (clientDetails == null)
+            {
+                return NotFound();
+            }
+
+            clientDetails.Client_Name = ClientDetails.Client_Name;
+            clientDetails.Client_Telephone = ClientDetails.Client_Telephone;
+            clientDetails.Client_Address = ClientDetails.Client_Address;
+            clientDetails.TIN = ClientDetails.TIN;
+            clientDetails.Payment_Terms = ClientDetails.Payment_Terms;
+
+            _Clouddb.SaveChanges();
+
+
+            return Ok(ClientDetails);
         }
 
-        [HttpGet("GetTransmittalSlips")]
-        public List<Transmittal_Slip> GetAllTransmittalSlips()
+        [HttpPut("DeleteCloudClients")]
+        public ActionResult<ClientEntity> DeleteCloudClient(Int32 Id)
         {
-            return _Localdb.Transmittal_Slip.ToList();
+
+            var clientDetails = _Clouddb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            if (clientDetails == null)
+            {
+                return NotFound();
+            }
+            _Clouddb.Remove(clientDetails);
+            _Clouddb.SaveChanges();
+
+
+            return NoContent();
         }
+
 
     }
 }
