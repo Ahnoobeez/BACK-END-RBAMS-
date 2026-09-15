@@ -23,6 +23,12 @@ namespace APINIMIRHEMAA.Controllers
             return _Localdb.Clients.ToList();
         }
 
+        [HttpGet("CLOUD CLIENTS GET")] //Kinukuha lahat ng nasa Database
+        public List<ClientEntity> GetAllCloudClients()
+        {
+            return _Clouddb.Clients.ToList();
+        }
+
         [HttpGet("GetClientsById")] // Kinukuha ang client details base sa ID
         public ActionResult<ClientEntity> GetClientDetails(Int32 Id)
         {
@@ -96,31 +102,31 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetCloudClients")]
         public List<ClientEntity> GetAllCloudClients()
         {
-            return _db.AuditTrail.ToList();
+            return _Localdb.AuditTrail.ToList();
         }
 
         [HttpGet("GetMaterialRequesitionSlips")]
         public List<MaterialRequesition_Slip> GetAllMaterialRequesitionSlips()
         {
-            return _db.MaterailsRequisition_Slip.ToList();
+            return _Localdb.MaterailsRequisition_Slip.ToList();
         }
 
         [HttpGet("GetMaterials")]
         public List<Materials> GetAllMaterials()
         {
-            return _db.Materials.ToList();
+            return _Localdb.Materials.ToList();
         }
 
         [HttpGet("GetStockTransferSlips")]
         public List<StockTransfer_Slip> GetAllStockTransferSlips()
         {
-            return _db.StockTransfer_Slip.ToList();
+            return _Localdb.StockTransfer_Slip.ToList();
         }
 
         [HttpGet("GetTransmittalSlips")]
         public List<Transmittal_Slip> GetAllTransmittalSlips()
         {
-            return _db.Transmittal_Slip.ToList();
+            return _Localdb.Transmittal_Slip.ToList();
         }
 
     }
