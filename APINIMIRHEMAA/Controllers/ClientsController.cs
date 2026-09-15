@@ -23,7 +23,7 @@ namespace APINIMIRHEMAA.Controllers
             return _Localdb.Clients.ToList();
         }
 
-        [HttpGet("GetLocalClientsById")] 
+        [HttpGet("GetClientsById")] // Kinukuha ang client details base sa ID
         public ActionResult<ClientEntity> GetClientDetails(Int32 Id)
         {
             if (Id == 0)
@@ -96,61 +96,31 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetCloudClients")]
         public List<ClientEntity> GetAllCloudClients()
         {
-            return _Clouddb.Clients.ToList();
+            return _db.AuditTrail.ToList();
         }
 
-        [HttpPost("AddCloudClients")]
-        public ActionResult<ClientEntity> AddCloudClient([FromBody] ClientEntity ClientDetails)
+        [HttpGet("GetMaterialRequesitionSlips")]
+        public List<MaterialRequesition_Slip> GetAllMaterialRequesitionSlips()
         {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-            _Clouddb.Clients.Add(ClientDetails);
-            _Clouddb.SaveChanges();
-            return Ok(ClientDetails);
+            return _db.MaterailsRequisition_Slip.ToList();
         }
 
-        [HttpPost("UpdateCloudClientDetails")]
-        public ActionResult<ClientEntity> UpdateCloudClient(Int32 Id, [FromBody] ClientEntity ClientDetails)
+        [HttpGet("GetMaterials")]
+        public List<Materials> GetAllMaterials()
         {
-            if (ClientDetails == null)
-            {
-                return BadRequest(ClientDetails);
-            }
-
-            var clientDetails = _Clouddb.Clients.FirstOrDefault(x => x.Client_ID == Id);
-            if (clientDetails == null)
-            {
-                return NotFound();
-            }
-
-            clientDetails.Client_Name = ClientDetails.Client_Name;
-            clientDetails.Client_Telephone = ClientDetails.Client_Telephone;
-            clientDetails.Client_Address = ClientDetails.Client_Address;
-            clientDetails.TIN = ClientDetails.TIN;
-            clientDetails.Payment_Terms = ClientDetails.Payment_Terms;
-
-            _Clouddb.SaveChanges();
-
-
-            return Ok(ClientDetails);
+            return _db.Materials.ToList();
         }
 
-        [HttpPut("DeleteCloudClients")]
-        public ActionResult<ClientEntity> DeleteCloudClient(Int32 Id)
+        [HttpGet("GetStockTransferSlips")]
+        public List<StockTransfer_Slip> GetAllStockTransferSlips()
         {
+            return _db.StockTransfer_Slip.ToList();
+        }
 
-            var clientDetails = _Clouddb.Clients.FirstOrDefault(x => x.Client_ID == Id);
-            if (clientDetails == null)
-            {
-                return NotFound();
-            }
-            _Clouddb.Remove(clientDetails);
-            _Clouddb.SaveChanges();
-
-
-            return NoContent();
+        [HttpGet("GetTransmittalSlips")]
+        public List<Transmittal_Slip> GetAllTransmittalSlips()
+        {
+            return _db.Transmittal_Slip.ToList();
         }
 
     }
