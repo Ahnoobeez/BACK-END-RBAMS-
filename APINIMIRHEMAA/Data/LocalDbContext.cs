@@ -27,5 +27,9 @@ namespace APINIMIRHEMAA.Data
         public DbSet<StockTransfer_Slip> StockTransfer_Slip { get; set; }
         public DbSet<Transmittal_Slip> Transmittal_Slip { get; set; }
         public DbSet<ServiceInvoice> ServiceInvoice { get; set; }
+        public DbSet<Users> Users { get; set; }
+        public DbSet<Roles> Roles { get; set; }
+        public DbSet<Departments> Departments { get; set; }
+
     }
 }
