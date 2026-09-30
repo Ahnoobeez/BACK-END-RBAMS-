@@ -1,10 +1,12 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APINIMIRHEMAA.Controllers
 {
+    [Authorize(Policy = "clients")]
     [Route("api/[controller]")]
     [ApiController]
     

@@ -1,5 +1,6 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -31,7 +32,6 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(ModelState);
             }
 
-            // Hash the password before saving it
             users.PasswordHash =
                 BCrypt.Net.BCrypt.HashPassword(users.PasswordHash);
 

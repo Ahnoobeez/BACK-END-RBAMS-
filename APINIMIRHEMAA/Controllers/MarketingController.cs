@@ -1,20 +1,25 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace APINIMIRHEMAA.Controllers
 {
+    [Authorize(Policy = "marketing")]
     [Route("api/[controller]")]
     [ApiController]
     public class MarketingController : ControllerBase
     {
         private LocalDbContext _Localdb;
         private CloudDbContext _CloudDb;
-        public MarketingController(LocalDbContext Localcontext, CloudDbContext Cloudcontext)
+        private readonly EncryptionService _encryptionService;
+        public MarketingController(LocalDbContext Localcontext, CloudDbContext Cloudcontext, EncryptionService encryptionService)
         {
             _Localdb = Localcontext;
             _CloudDb = Cloudcontext;
+            _encryptionService = encryptionService;
         }
 
         // ------------------------------ CLIENTS PROJECT ------------------------------
@@ -22,7 +27,19 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalClientsProject")]
         public List<ClientsProject> GetAllLocalClientsProject()
         {
-            return _Localdb.ClientsProject.ToList();
+            var projects = _Localdb.ClientsProject.ToList();
+
+            foreach (var project in projects)
+            {
+                project.Attention = _encryptionService.Decrypt(project.Attention);
+                project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
+                project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
+                project.Representative = _encryptionService.Decrypt(project.Representative);
+                project.Contact_Person = _encryptionService.Decrypt(project.Contact_Person);
+                project.Account_Executive = _encryptionService.Decrypt(project.Account_Executive);
+            }
+
+            return projects;
         }
 
         [HttpGet("GetLocalClientsProjectById")]
@@ -47,6 +64,13 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+
+            ClientProjectDetails.Attention = _encryptionService.Encrypt(ClientProjectDetails.Attention);
+            ClientProjectDetails.Business_Style = _encryptionService.Encrypt(ClientProjectDetails.Business_Style);
+            ClientProjectDetails.Client_Subject = _encryptionService.Encrypt(ClientProjectDetails.Client_Subject);
+            ClientProjectDetails.Representative = _encryptionService.Encrypt(ClientProjectDetails.Representative);
+            ClientProjectDetails.Contact_Person = _encryptionService.Encrypt(ClientProjectDetails.Contact_Person);
+            ClientProjectDetails.Account_Executive = _encryptionService.Encrypt(ClientProjectDetails.Account_Executive);
             _Localdb.ClientsProject.Add(ClientProjectDetails);
             _Localdb.SaveChanges();
             return Ok(ClientProjectDetails);
@@ -71,12 +95,12 @@ namespace APINIMIRHEMAA.Controllers
             updateClientsProject.Attention = UpdateClientsProject.Attention;
             updateClientsProject.Business_Style = UpdateClientsProject.Business_Style;
             updateClientsProject.Client_Subject = UpdateClientsProject.Client_Subject;
-            updateClientsProject.FileID = UpdateClientsProject.FileID;
             updateClientsProject.Representative = UpdateClientsProject.Representative;
             updateClientsProject.Contact_Person = UpdateClientsProject.Contact_Person;
             updateClientsProject.Account_Executive = UpdateClientsProject.Account_Executive;
             updateClientsProject.Date = UpdateClientsProject.Date;
             updateClientsProject.Time = UpdateClientsProject.Time;
+            updateClientsProject.Status = UpdateClientsProject.Status;
 
 
             _Localdb.SaveChanges();
@@ -154,7 +178,6 @@ namespace APINIMIRHEMAA.Controllers
             updateClientsProject.Attention = UpdateClientsProject.Attention;
             updateClientsProject.Business_Style = UpdateClientsProject.Business_Style;
             updateClientsProject.Client_Subject = UpdateClientsProject.Client_Subject;
-            updateClientsProject.FileID = UpdateClientsProject.FileID;
             updateClientsProject.Representative = UpdateClientsProject.Representative;
             updateClientsProject.Contact_Person = UpdateClientsProject.Contact_Person;
             updateClientsProject.Account_Executive = UpdateClientsProject.Account_Executive;
@@ -234,16 +257,8 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             updateQuotation.Quotation_ID = UpdateQuotation.Quotation_ID;
-            updateQuotation.Client_ID = UpdateQuotation.Client_ID;
             updateQuotation.Project_ID = UpdateQuotation.Project_ID;
             updateQuotation.Title = UpdateQuotation.Title;
-            updateQuotation.Store = UpdateQuotation.Store;
-            updateQuotation.Description = UpdateQuotation.Description;
-            updateQuotation.Width = UpdateQuotation.Width;
-            updateQuotation.Height = UpdateQuotation.Height;
-            updateQuotation.Quantity = UpdateQuotation.Quantity;
-            updateQuotation.Unit_Price = UpdateQuotation.Unit_Price;
-            updateQuotation.Total_Amount = UpdateQuotation.Total_Amount;
             updateQuotation.Sub_Total = UpdateQuotation.Sub_Total;
             updateQuotation.Less_Discount = UpdateQuotation.Less_Discount;
             updateQuotation.Ingress_and_Engress = UpdateQuotation.Ingress_and_Engress;
@@ -318,16 +333,7 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             updateQuotation.Quotation_ID = UpdateQuotation.Quotation_ID;
-            updateQuotation.Client_ID = UpdateQuotation.Client_ID;
             updateQuotation.Project_ID = UpdateQuotation.Project_ID;
-            updateQuotation.Title = UpdateQuotation.Title;
-            updateQuotation.Store = UpdateQuotation.Store;
-            updateQuotation.Description = UpdateQuotation.Description;
-            updateQuotation.Width = UpdateQuotation.Width;
-            updateQuotation.Height = UpdateQuotation.Height;
-            updateQuotation.Quantity = UpdateQuotation.Quantity;
-            updateQuotation.Unit_Price = UpdateQuotation.Unit_Price;
-            updateQuotation.Total_Amount = UpdateQuotation.Total_Amount;
             updateQuotation.Sub_Total = UpdateQuotation.Sub_Total;
             updateQuotation.Less_Discount = UpdateQuotation.Less_Discount;
             updateQuotation.Ingress_and_Engress = UpdateQuotation.Ingress_and_Engress;
@@ -358,12 +364,174 @@ namespace APINIMIRHEMAA.Controllers
 
         // ------------------------------- QUOTATION -------------------------------
 
+        // ------------------------------- QUOTATION ITEMS -------------------------------
+
+
+        [HttpGet("GetLocalQuotationItems")]
+        public List<Quotation_Items> GetAllLocalQuotationsItems()
+        {
+            return _Localdb.Quotation_Items.ToList();
+        }
+
+        [HttpGet("GetLocalQuotationItemsByID")]
+        public ActionResult<Quotation_Items> GetLocalQuotationItemDetails(Int32 Id)
+        {
+            if (Id == 0)
+            {
+                return BadRequest("Invalid client ID.");
+            }
+            var QI_Id = _Localdb.Quotation_Items.FirstOrDefault(x => x.QI_ID == Id);
+            if (QI_Id == null)
+            {
+                return NotFound("Client not found.");
+            }
+            return QI_Id;
+        }
+
+        [HttpPost("AddLocalQuotationItems")]
+        public ActionResult<Quotation_Items> AddLocalQuotationsItems([FromBody] Quotation_Items QuotationItemDetails)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _Localdb.Quotation_Items.Add(QuotationItemDetails);
+            _Localdb.SaveChanges();
+            return Ok(QuotationItemDetails);
+        }
+
+        [HttpPost("UpdateLocalQuotationItems")]
+        public ActionResult<Quotation_Items> UpdateLocalQuotationItems(Int32 Id, [FromBody] Quotation_Items UpdateQuotationItems)
+        {
+            if (UpdateQuotationItems == null)
+            {
+                return BadRequest(UpdateQuotationItems);
+            }
+            var updateQuotationItems = _Localdb.Quotation_Items.FirstOrDefault(x => x.QI_ID == Id);
+            if (updateQuotationItems == null)
+            {
+                return NotFound();
+            }
+
+            updateQuotationItems.QI_ID = UpdateQuotationItems.QI_ID;
+            updateQuotationItems.Description = UpdateQuotationItems.Description;
+            updateQuotationItems.Width = UpdateQuotationItems.Width;
+            updateQuotationItems.Height = UpdateQuotationItems.Height;
+            updateQuotationItems.Quantity = UpdateQuotationItems.Quantity;
+            updateQuotationItems.Unit_Price = UpdateQuotationItems.Unit_Price;
+            updateQuotationItems.Total_Amount = UpdateQuotationItems.Total_Amount;
+            updateQuotationItems.QS_ID = UpdateQuotationItems.QS_ID;
+
+
+            _Localdb.SaveChanges();
+            return Ok(UpdateQuotationItems);
+        }
+
+        [HttpPut("DeleteQuotationItems")]
+        public ActionResult<Quotation_Items> DeleteLocalQuotationItems(Int32 Id)
+        {
+            var quotationItemDetails = _Localdb.Quotation_Items.FirstOrDefault(x => x.QI_ID == Id);
+            if (quotationItemDetails == null)
+            {
+                return NotFound();
+            }
+            _Localdb.Remove(quotationItemDetails);
+            _Localdb.SaveChanges();
+            return NoContent();
+        }
+
+        // ------------------------------- QUOTATION ITEMS -------------------------------
+
+        // ------------------------------- QUOTATION STORE -------------------------------
+
+
+        [HttpGet("GetLocalQuotationStore")]
+        public List<Quotation_Store> GetAllLocalQuotationsStore()
+        {
+            return _Localdb.Quotation_Store.ToList();
+        }
+
+        [HttpGet("GetLocalQuotationStoreByID")]
+        public ActionResult<Quotation_Store> GetLocalQuotationStoreDetails(Int32 Id)
+        {
+            if (Id == 0)
+            {
+                return BadRequest("Invalid client ID.");
+            }
+            var QS_Id = _Localdb.Quotation_Store.FirstOrDefault(x => x.QS_ID == Id);
+            if (QS_Id == null)
+            {
+                return NotFound("Client not found.");
+            }
+            return QS_Id;
+        }
+
+        [HttpPost("AddLocalQuotationStore")]
+        public ActionResult<Quotation_Store> AddLocalQuotationStore([FromBody] Quotation_Store QuotationStoreDetails)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _Localdb.Quotation_Store.Add(QuotationStoreDetails);
+            _Localdb.SaveChanges();
+            return Ok(QuotationStoreDetails);
+        }
+
+        [HttpPost("UpdateLocalQuotationStore")]
+        public ActionResult<Quotation_Store> UpdateLocalQuotationStore(Int32 Id, [FromBody] Quotation_Store UpdateQuotationStore)
+        {
+            if (UpdateQuotationStore == null)
+            {
+                return BadRequest(UpdateQuotationStore);
+            }
+            var updateQuotationStore = _Localdb.Quotation_Store.FirstOrDefault(x => x.QS_ID == Id);
+            if (updateQuotationStore == null)
+            {
+                return NotFound();
+            }
+
+            UpdateQuotationStore.QS_ID = UpdateQuotationStore.QS_ID;
+            UpdateQuotationStore.Store = UpdateQuotationStore.Store;
+            UpdateQuotationStore.Quotation_ID = UpdateQuotationStore.Quotation_ID;
+
+
+            _Localdb.SaveChanges();
+            return Ok(UpdateQuotationStore);
+        }
+
+        [HttpPut("DeleteQuotationStore")]
+        public ActionResult<Quotation_Store> DeleteLocalQuotationStore(Int32 Id)
+        {
+            var quotationStoreDetails = _Localdb.Quotation_Store.FirstOrDefault(x => x.QS_ID == Id);
+            if (quotationStoreDetails == null)
+            {
+                return NotFound();
+            }
+            _Localdb.Remove(quotationStoreDetails);
+            _Localdb.SaveChanges();
+            return NoContent();
+        }
+
+        // ------------------------------- QUOTATION STORE -------------------------------
+
+
         // ------------------------------- CONFORME -------------------------------
 
         [HttpGet("GetLocalConforme")]
         public List<Conforme> GetAllLocalConforme()
         {
-            return _Localdb.Conforme.ToList();
+            var conforme = _Localdb.Conforme.ToList();
+
+            foreach (var _conforme in conforme)
+            {
+                _conforme.FIleData = _encryptionService.Decrypt(_conforme.FIleData);
+
+            }
+
+            return conforme;
+
+
         }
 
         [HttpGet("GetLocalConformeByID")]
@@ -388,6 +556,9 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+
+            conforme.FIleData = _encryptionService.Encrypt(conforme.FIleData);
+
             _Localdb.Conforme.Add(conforme);
             _Localdb.SaveChanges();
             return Ok(conforme);
@@ -405,11 +576,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateConforme.Quotation_ID = _conforme.Quotation_ID;
             updateConforme.FileName = _conforme.FileName;
             updateConforme.FileExtension = _conforme.FileExtension;
             updateConforme.FIleData = _conforme.FIleData;
             updateConforme.Quotation_ID = _conforme.Quotation_ID;
+            updateConforme.Status = _conforme.Status;
 
             _Localdb.SaveChanges();
             return Ok(updateConforme);
@@ -547,24 +718,21 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             updateJobOrder.JobOrder_ID = _jobOrder.JobOrder_ID;
-            updateJobOrder.Client_ID = _jobOrder.Client_ID;
-            updateJobOrder.Quotation_ID = _jobOrder.Quotation_ID;
-            updateJobOrder.Project_ID = _jobOrder.Project_ID;
+            updateJobOrder.Conforme_FileID = _jobOrder.Conforme_FileID;
             updateJobOrder.Title = _jobOrder.Title;
             updateJobOrder.Quantity = _jobOrder.Quantity;
             updateJobOrder.Width = _jobOrder.Width;
             updateJobOrder.Length = _jobOrder.Length;
-            updateJobOrder.Material_Code = _jobOrder.Material_Code;
             updateJobOrder.Artist_Initial = _jobOrder.Artist_Initial;
             updateJobOrder.Production_Initial = _jobOrder.Production_Initial;
             updateJobOrder.Remarks = _jobOrder.Remarks;
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
-            updateJobOrder.Project_ID = _jobOrder.Project_ID;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
             updateJobOrder.Tiling = _jobOrder.Tiling;
             updateJobOrder.Eyelet = _jobOrder.Eyelet;
             updateJobOrder.Bleeding = _jobOrder.Bleeding;
+            updateJobOrder.Status = _jobOrder.Status;
 
 
             _Localdb.SaveChanges();
@@ -631,19 +799,15 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             updateJobOrder.JobOrder_ID = _jobOrder.JobOrder_ID;
-            updateJobOrder.Client_ID = _jobOrder.Client_ID;
-            updateJobOrder.Quotation_ID = _jobOrder.Quotation_ID;
-            updateJobOrder.Project_ID = _jobOrder.Project_ID;
+            updateJobOrder.Conforme_FileID = _jobOrder.Conforme_FileID;
             updateJobOrder.Title = _jobOrder.Title;
             updateJobOrder.Quantity = _jobOrder.Quantity;
             updateJobOrder.Width = _jobOrder.Width;
             updateJobOrder.Length = _jobOrder.Length;
-            updateJobOrder.Material_Code = _jobOrder.Material_Code;
             updateJobOrder.Artist_Initial = _jobOrder.Artist_Initial;
             updateJobOrder.Production_Initial = _jobOrder.Production_Initial;
             updateJobOrder.Remarks = _jobOrder.Remarks;
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
-            updateJobOrder.Project_ID = _jobOrder.Project_ID;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
             updateJobOrder.Tiling = _jobOrder.Tiling;
@@ -717,10 +881,12 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updatePurchaseOrder.Quotation_ID = _purchaseOrder.Quotation_ID;
+            updatePurchaseOrder.Conforme_FileID = _purchaseOrder.Conforme_FileID;
             updatePurchaseOrder.FileName = _purchaseOrder.FileName;
             updatePurchaseOrder.FileExtension = _purchaseOrder.FileExtension;
             updatePurchaseOrder.FileData = _purchaseOrder.FileData;
+            updatePurchaseOrder.Status = _purchaseOrder.Status;
+
             _Localdb.SaveChanges();
             return Ok(updatePurchaseOrder);
         }
@@ -784,7 +950,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updatePurchaseOrder.Quotation_ID = _purchaseOrder.Quotation_ID;
+            updatePurchaseOrder.Conforme_FileID = _purchaseOrder.Conforme_FileID;
             updatePurchaseOrder.FileName = _purchaseOrder.FileName;
             updatePurchaseOrder.FileExtension = _purchaseOrder.FileExtension;
             updatePurchaseOrder.FileData = _purchaseOrder.FileData;
@@ -859,6 +1025,7 @@ namespace APINIMIRHEMAA.Controllers
             updateGraphics.FileExtension = _graphics.FileExtension;
             updateGraphics.FileData = _graphics.FileData;
             updateGraphics.Quotation_ID = _graphics.Quotation_ID;
+
             _Localdb.SaveChanges();
             return Ok(updateGraphics);
         }
@@ -997,6 +1164,9 @@ namespace APINIMIRHEMAA.Controllers
             updateServiceInvoice.Description = serviceInvoice.Description;
             updateServiceInvoice.Unit_Price = serviceInvoice.Unit_Price;
             updateServiceInvoice.Amount = serviceInvoice.Amount;
+            updateServiceInvoice.Status = serviceInvoice.Status;
+
+
             _Localdb.SaveChanges();
             return Ok(updateServiceInvoice);
         }
@@ -1270,8 +1440,9 @@ namespace APINIMIRHEMAA.Controllers
             updateDeliveryReceipt.Delivery_ID = deliveryReceipt.Delivery_ID;
             updateDeliveryReceipt.Title = deliveryReceipt.Title;
             updateDeliveryReceipt.Quantity = deliveryReceipt.Quantity;
-            updateDeliveryReceipt.Unit = deliveryReceipt.Unit;
             updateDeliveryReceipt.Description = deliveryReceipt.Description;
+            updateDeliveryReceipt.Status = deliveryReceipt.Status;
+
             _Localdb.SaveChanges();
             return Ok(updateDeliveryReceipt);
         }
@@ -1338,7 +1509,6 @@ namespace APINIMIRHEMAA.Controllers
             updateDeliveryReceipt.Delivery_ID = deliveryReceipt.Delivery_ID;
             updateDeliveryReceipt.Title = deliveryReceipt.Title;
             updateDeliveryReceipt.Quantity = deliveryReceipt.Quantity;
-            updateDeliveryReceipt.Unit = deliveryReceipt.Unit;
             updateDeliveryReceipt.Description = deliveryReceipt.Description;
             _CloudDb.SaveChanges();
             return Ok(updateDeliveryReceipt);
@@ -1548,15 +1718,12 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             updateCollectionReceipt.CollectionReceipt_ID = collectionReceipt.CollectionReceipt_ID;
-            updateCollectionReceipt.Payment_Method = collectionReceipt.Payment_Method;
-            updateCollectionReceipt.Payment_Date = collectionReceipt.Payment_Date;
-            updateCollectionReceipt.Account_Number = collectionReceipt.Account_Number;
-            updateCollectionReceipt.Transaction_Description = collectionReceipt.Transaction_Description;
-            updateCollectionReceipt.Amount = collectionReceipt.Amount;
-            updateCollectionReceipt.Total_Paid_Amount = collectionReceipt.Total_Paid_Amount;
-            updateCollectionReceipt.Invoice_Reference_Number = collectionReceipt.Invoice_Reference_Number;
-            updateCollectionReceipt.Check_Number = collectionReceipt.Check_Number;
-            updateCollectionReceipt.Bank = collectionReceipt.Bank;
+            updateCollectionReceipt.FileName = collectionReceipt.FileName;
+            updateCollectionReceipt.FileExtension = collectionReceipt.FileExtension;
+            updateCollectionReceipt.FileData = collectionReceipt.FileData;
+            updateCollectionReceipt.JobOrderID = collectionReceipt.JobOrderID;
+            updateCollectionReceipt.Status = collectionReceipt.Status;
+
             _Localdb.SaveChanges();
             return Ok(updateCollectionReceipt);
         }
@@ -1621,15 +1788,12 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             updateCollectionReceipt.CollectionReceipt_ID = collectionReceipt.CollectionReceipt_ID;
-            updateCollectionReceipt.Payment_Method = collectionReceipt.Payment_Method;
-            updateCollectionReceipt.Payment_Date = collectionReceipt.Payment_Date;
-            updateCollectionReceipt.Account_Number = collectionReceipt.Account_Number;
-            updateCollectionReceipt.Transaction_Description = collectionReceipt.Transaction_Description;
-            updateCollectionReceipt.Amount = collectionReceipt.Amount;
-            updateCollectionReceipt.Total_Paid_Amount = collectionReceipt.Total_Paid_Amount;
-            updateCollectionReceipt.Invoice_Reference_Number = collectionReceipt.Invoice_Reference_Number;
-            updateCollectionReceipt.Check_Number = collectionReceipt.Check_Number;
-            updateCollectionReceipt.Bank = collectionReceipt.Bank;
+            updateCollectionReceipt.FileName = collectionReceipt.FileName;
+            updateCollectionReceipt.FileExtension = collectionReceipt.FileExtension;
+            updateCollectionReceipt.FileData = collectionReceipt.FileData;
+            updateCollectionReceipt.JobOrderID = collectionReceipt.JobOrderID;
+            updateCollectionReceipt.Status = collectionReceipt.Status;
+
             _CloudDb.SaveChanges();
             return Ok(updateCollectionReceipt);
         }

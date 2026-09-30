@@ -21,7 +21,7 @@ namespace APINIMIRHEMAA.Data
         public DbSet<Graphics> Graphics { get; set; }
         public DbSet<Installation_Schedule> Installation_Schedule { get; set; }
         public DbSet<IssuedBy> IssuedBy { get; set; }
-        public DbSet<MaterialRequesition_Slip> MaterailsRequisition_Slip { get; set; }
+        public DbSet<MaterialRequesition_Slip> MaterialRequisition_Slip { get; set; }
         public DbSet<Materials> Materials { get; set; }
         public DbSet<PurchaseOrder> PurchaseOrder { get; set; }
         public DbSet<StockTransfer_Slip> StockTransfer_Slip { get; set; }
@@ -30,6 +30,11 @@ namespace APINIMIRHEMAA.Data
         public DbSet<Users> Users { get; set; }
         public DbSet<Roles> Roles { get; set; }
         public DbSet<Departments> Departments { get; set; }
+        public DbSet<Inventory> Inventory { get; set; }
+        public DbSet<Purchased_Material> Purchased_Material { get; set; }
+        public DbSet<Quotation_Items> Quotation_Items { get; set; }
+        public DbSet<Quotation_Store> Quotation_Store { get; set; }
+
 
     }
 }

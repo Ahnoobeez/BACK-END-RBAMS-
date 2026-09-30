@@ -1,5 +1,8 @@
 ﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.DTO.Login;
 using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,70 +12,51 @@ namespace APINIMIRHEMAA.Controllers
     [ApiController]
     public class AuthController : ControllerBase
     {
-        private readonly LocalDbContext _Localdb;
+        private readonly LocalDbContext _context;
+        private readonly JwtService _jwtService;
 
-        public AuthController(LocalDbContext Localcontext)
+        public AuthController(LocalDbContext context, JwtService jwtService)
         {
-            _Localdb = Localcontext;
+            _context = context;
+            _jwtService = jwtService;
         }
+
         [HttpPost("login")]
-        public async Task<IActionResult> Login(LoginRequest request)
+        public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            // 1. Find the user
-            var user = await _Localdb.Users
-                .FirstOrDefaultAsync(u => u.Email == request.Email);
 
-            // 2. User doesn't exist
-            if (user == null)
+            var identifier = request.Username?.Trim() ?? "";
+
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.Username == identifier || u.Email == identifier);
+
+            // Same message for every failure so attackers can't tell which part was wrong
+            if (user == null || !user.IsActive ||
+                !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             {
-                return Unauthorized(new
-                {
-                    message = "Invalid email or password."
-                });
+                return Unauthorized(new { message = "Invalid username or password." });
             }
 
-            // 3. Check the password HERE
-            bool passwordValid =
-                BCrypt.Net.BCrypt.Verify(
-                    request.Password,
-                    user.PasswordHash
-                );
-
-            // 4. Password is incorrect
-            if (!passwordValid)
-            {
-                return Unauthorized(new
-                {
-                    message = "Invalid email or password."
-                });
-            }
-
-            // 5. Get the user's role
-            var role = await _Localdb.Roles
+            var role = await _context.Roles
                 .FirstOrDefaultAsync(r => r.Role_ID == user.Role_ID);
-
-            // 6. Get the user's department
-            var department = await _Localdb.Departments
+            var department = await _context.Departments
                 .FirstOrDefaultAsync(d => d.Department_ID == user.Department_ID);
 
-            // 7. Login successful
+            if (role == null || department == null)
+                return Unauthorized(new { message = "Account is not fully configured." });
+
+            var token = _jwtService.GenerateToken(
+                user.User_ID, user.Username, role.Role_Name, department.Department_Name);
+
+            var modules = ModuleAccess.GetModules(role.Role_Name, department.Department_Name);
+
             return Ok(new
             {
-                message = "Login successful",
-
-                user = new
-                {
-                    userId = user.User_ID,
-                    employeeId = user.Employee_ID,
-                    username = user.Username,
-                    email = user.Email,
-
-                    roleId = user.Role_ID,
-                    role = role?.Role_Name,
-
-                    departmentId = user.Department_ID,
-                    department = department?.Department_Name
-                }
+                token,
+                username = user.Username,
+                role = role.Role_Name,
+                department = department.Department_Name,
+                modules
             });
         }
     }
