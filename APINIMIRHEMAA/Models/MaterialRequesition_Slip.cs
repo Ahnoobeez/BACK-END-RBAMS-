@@ -19,6 +19,8 @@ namespace APINIMIRHEMAA.Models
         public string Approved_By { get; set; }
         public string Submmited_By { get; set; }
         public string Received_By { get; set; }
+        public string Status { get; set; }
+
 
     }
 }

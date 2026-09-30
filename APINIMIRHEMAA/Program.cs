@@ -1,4 +1,5 @@
 using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.Services;
 using Microsoft.EntityFrameworkCore;
  
 var builder = WebApplication.CreateBuilder(args);
@@ -28,6 +29,9 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod();
     });
 });
+
+builder.Services.AddDataProtection();
+builder.Services.AddScoped<EncryptionService>();
 
 var app = builder.Build();
 

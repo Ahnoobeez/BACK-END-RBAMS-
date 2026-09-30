@@ -31,7 +31,6 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(ModelState);
             }
 
-            // Hash the password before saving it
             users.PasswordHash =
                 BCrypt.Net.BCrypt.HashPassword(users.PasswordHash);
 

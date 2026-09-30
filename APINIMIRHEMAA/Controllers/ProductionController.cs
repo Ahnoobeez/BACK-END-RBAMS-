@@ -65,19 +65,15 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             updateJobOrder.JobOrder_ID = _jobOrder.JobOrder_ID;
-            updateJobOrder.Client_ID = _jobOrder.Client_ID;
-            updateJobOrder.Quotation_ID = _jobOrder.Quotation_ID;
-            updateJobOrder.Project_ID = _jobOrder.Project_ID;
+            updateJobOrder.Conforme_FileID = _jobOrder.Conforme_FileID;
             updateJobOrder.Title = _jobOrder.Title;
             updateJobOrder.Quantity = _jobOrder.Quantity;
             updateJobOrder.Width = _jobOrder.Width;
             updateJobOrder.Length = _jobOrder.Length;
-            updateJobOrder.Material_Code = _jobOrder.Material_Code;
             updateJobOrder.Artist_Initial = _jobOrder.Artist_Initial;
             updateJobOrder.Production_Initial = _jobOrder.Production_Initial;
             updateJobOrder.Remarks = _jobOrder.Remarks;
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
-            updateJobOrder.Project_ID = _jobOrder.Project_ID;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
             updateJobOrder.Tiling = _jobOrder.Tiling;
@@ -148,19 +144,15 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             updateJobOrder.JobOrder_ID = _jobOrder.JobOrder_ID;
-            updateJobOrder.Client_ID = _jobOrder.Client_ID;
-            updateJobOrder.Quotation_ID = _jobOrder.Quotation_ID;
-            updateJobOrder.Project_ID = _jobOrder.Project_ID;
+            updateJobOrder.Conforme_FileID = _jobOrder.Conforme_FileID;
             updateJobOrder.Title = _jobOrder.Title;
             updateJobOrder.Quantity = _jobOrder.Quantity;
             updateJobOrder.Width = _jobOrder.Width;
             updateJobOrder.Length = _jobOrder.Length;
-            updateJobOrder.Material_Code = _jobOrder.Material_Code;
             updateJobOrder.Artist_Initial = _jobOrder.Artist_Initial;
             updateJobOrder.Production_Initial = _jobOrder.Production_Initial;
             updateJobOrder.Remarks = _jobOrder.Remarks;
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
-            updateJobOrder.Project_ID = _jobOrder.Project_ID;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
             updateJobOrder.Tiling = _jobOrder.Tiling;
@@ -468,7 +460,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalMaterialRequesitionSlips")]
         public List<MaterialRequesition_Slip> GetAllLocalMaterialRequesitionSlips()
         {
-            return _Localdb.MaterailsRequisition_Slip.ToList();
+            return _Localdb.MaterialRequisition_Slip.ToList();
         }
 
         [HttpGet("GetLocalMaterialRequesitionSlipsByID")]
@@ -478,7 +470,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var materialRequesitionSlip = _Localdb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
+            var materialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
             if (materialRequesitionSlip == null)
             {
                 return NotFound();
@@ -505,7 +497,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
-            var updateMaterialRequesitionSlip = _Localdb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == Id);
+            var updateMaterialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == Id);
             if (updateMaterialRequesitionSlip == null)
             {
                 return NotFound();
@@ -532,7 +524,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPut("DeleteLocalMaterialRequesitionSlip")]
         public ActionResult<MaterialRequesition_Slip> DeleteLocalMaterialRequesitionSlip(int id)
         {
-            var materialRequesitionSlip = _Localdb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
+            var materialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
             if (materialRequesitionSlip == null)
             {
                 return NotFound();

@@ -55,16 +55,6 @@ namespace APINIMIRHEMAA.Controllers
             localMaterial.Item_Name = materials.Item_Name;
             localMaterial.Category = materials.Category;
             localMaterial.Unit = materials.Unit;
-            localMaterial.Beginning_Balance = materials.Beginning_Balance;
-            localMaterial.Buffer = materials.Buffer;
-            localMaterial.Purchased = materials.Purchased;
-            localMaterial.Request = materials.Request;
-            localMaterial.Returned = materials.Returned;
-            localMaterial.Balance = materials.Balance;
-            localMaterial.Available_Balance = materials.Available_Balance;
-            localMaterial.Item_Description = materials.Item_Description;
-            localMaterial.Date = materials.Date;
-
             _Localdb.SaveChanges();
 
             return Ok(localMaterial);
@@ -122,16 +112,6 @@ namespace APINIMIRHEMAA.Controllers
             cloudMaterial.Item_Name = materials.Item_Name;
             cloudMaterial.Category = materials.Category;
             cloudMaterial.Unit = materials.Unit;
-            cloudMaterial.Beginning_Balance = materials.Beginning_Balance;
-            cloudMaterial.Buffer = materials.Buffer;
-            cloudMaterial.Purchased = materials.Purchased;
-            cloudMaterial.Request = materials.Request;
-            cloudMaterial.Returned = materials.Returned;
-            cloudMaterial.Balance = materials.Balance;
-            cloudMaterial.Available_Balance = materials.Available_Balance;
-            cloudMaterial.Item_Description = materials.Item_Description;
-            cloudMaterial.Date = materials.Date;
-
             _CloudDb.SaveChanges();
 
             return Ok(cloudMaterial);
@@ -154,12 +134,268 @@ namespace APINIMIRHEMAA.Controllers
 
         // --------------------------- MATERIALS ---------------------------
 
+        // --------------------------- INVENTORY ---------------------------
+
+        [HttpGet("GetLocalInventory")]
+        public List<Inventory> GetAllLocalInventory()
+        {
+            return _Localdb.Inventory.ToList();
+        }
+
+        [HttpPost("AddLocalInventory")]
+        public ActionResult<Inventory> AddLocalInventory([FromBody] Inventory inventory)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _Localdb.Inventory.Add(inventory);
+            _Localdb.SaveChanges();
+            return Ok(inventory);
+        }
+
+        [HttpPost("UpdateLocalInventory")]
+        public ActionResult<Inventory> UpdateLocalInventory([FromBody] Inventory inventory)
+        {
+            if (inventory == null)
+            {
+                return BadRequest(inventory);
+            }
+
+            var _inventory = _Localdb.Inventory.FirstOrDefault(x => x.Material_ID == inventory.Material_ID);
+            if (_inventory == null)
+            {
+                return NotFound();
+            }
+
+            _inventory.Inventory_ID = inventory.Inventory_ID;
+            _inventory.Beginning_Balance = inventory.Beginning_Balance;
+            _inventory.Buffer = inventory.Buffer;
+            _inventory.Purchased = inventory.Purchased;
+            _inventory.Request = inventory.Request;
+            _inventory.Returned = inventory.Returned;
+            _inventory.Balance = inventory.Balance;
+            _inventory.Available_Balance = inventory.Available_Balance;
+            _inventory.Status = inventory.Status;
+            _inventory.Material_ID = inventory.Material_ID;
+            _Localdb.SaveChanges();
+
+            return Ok(_inventory);
+        }
+
+        [HttpPut("DeleteLocalInventory")]
+        public ActionResult<Inventory> DeleteLocalInventory(Int32 Id)
+        {
+
+            var _inventory = _Localdb.Inventory.FirstOrDefault(x => x.Inventory_ID == Id);
+            if (_inventory == null)
+            {
+                return NotFound();
+            }
+            _Localdb.Remove(_inventory);
+            _Localdb.SaveChanges();
+
+            return NoContent();
+        }
+
+        [HttpGet("GetCloudInventory")]
+        public List<Inventory> GetAllCloudInventory()
+        {
+            return _CloudDb.Inventory.ToList();
+        }
+
+        [HttpPost("AddCloudInventory")]
+        public ActionResult<Inventory> AddCloudInventory([FromBody] Inventory inventory)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _CloudDb.Inventory.Add(inventory);
+            _CloudDb.SaveChanges();
+            return Ok(inventory);
+        }
+
+        [HttpPost("UpdateCloudInventory")]
+        public ActionResult<Inventory> UpdateCloudInventory([FromBody] Inventory inventory)
+        {
+            if (inventory == null)
+            {
+                return BadRequest(inventory);
+            }
+
+            var _inventory = _CloudDb.Inventory.FirstOrDefault(x => x.Material_ID == inventory.Material_ID);
+            if (_inventory == null)
+            {
+                return NotFound();
+            }
+
+            _inventory.Inventory_ID = inventory.Inventory_ID;
+            _inventory.Beginning_Balance = inventory.Beginning_Balance;
+            _inventory.Buffer = inventory.Buffer;
+            _inventory.Purchased = inventory.Purchased;
+            _inventory.Request = inventory.Request;
+            _inventory.Returned = inventory.Returned;
+            _inventory.Balance = inventory.Balance;
+            _inventory.Available_Balance = inventory.Available_Balance;
+            _inventory.Status = inventory.Status;
+            _inventory.Material_ID = inventory.Material_ID;
+            _CloudDb.SaveChanges();
+
+            return Ok(_inventory);
+        }
+
+        [HttpPut("DeleteCloudInventory")]
+        public ActionResult<Inventory> DeleteCloudInventory(Int32 Id)
+        {
+
+            var _inventory = _CloudDb.Inventory.FirstOrDefault(x => x.Inventory_ID == Id);
+            if (_inventory == null)
+            {
+                return NotFound();
+            }
+            _CloudDb.Remove(_inventory);
+            _CloudDb.SaveChanges();
+
+            return NoContent();
+        }
+
+        // --------------------------- INVENTORY ---------------------------
+
+        // --------------------------- PURCHASE MATERIAL ---------------------------
+
+        [HttpGet("GetLocalPurchaseMaterial")]
+        public List<Purchased_Material> GetAllLocalPurchaseMaterial()
+        {
+            return _Localdb.Purchased_Material.ToList();
+        }
+
+        [HttpPost("AddLocalPurchaseMaterial")]
+        public ActionResult<Purchased_Material> AddLocalPurchaseMaterial([FromBody] Purchased_Material purchased_material)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _Localdb.Purchased_Material.Add(purchased_material);
+            _Localdb.SaveChanges();
+            return Ok(purchased_material);
+        }
+
+        [HttpPost("UpdateLocalPurchaseMaterial")]
+        public ActionResult<Purchased_Material> UpdateLocalPurchaseMaterial([FromBody] Purchased_Material purchased_material)
+        {
+            if (purchased_material == null)
+            {
+                return BadRequest(purchased_material);
+            }
+
+            var _purchased_material = _Localdb.Purchased_Material.FirstOrDefault(x => x.Purchased_ID == purchased_material.Purchased_ID);
+            if (_purchased_material == null)
+            {
+                return NotFound();
+            }
+
+            _purchased_material.Purchased_ID = purchased_material.Purchased_ID;
+            _purchased_material.Date_Received_Item = purchased_material.Date_Received_Item;
+            _purchased_material.SI_Date = purchased_material.SI_Date;
+            _purchased_material.SI_No = purchased_material.SI_No;
+            _purchased_material.Supplier_Name = purchased_material.Supplier_Name;
+            _purchased_material.Remarks = purchased_material.Remarks;
+            _purchased_material.Quantity = purchased_material.Quantity;
+            _purchased_material.Unit_price = purchased_material.Unit_price;
+            _purchased_material.Amount = purchased_material.Amount;
+            _purchased_material.Material_ID = purchased_material.Material_ID;
+            _Localdb.SaveChanges();
+
+            return Ok(_purchased_material);
+        }
+
+        [HttpPut("DeleteLocalPurchaseMaterial")]
+        public ActionResult<Purchased_Material> DeleteLocalPurchaseMaterial(Int32 Id)
+        {
+
+            var purchased_material = _Localdb.Purchased_Material.FirstOrDefault(x => x.Purchased_ID == Id);
+            if (purchased_material == null)
+            {
+                return NotFound();
+            }
+            _Localdb.Remove(purchased_material);
+            _Localdb.SaveChanges();
+
+            return NoContent();
+        }
+
+        [HttpGet("GetCloudPurchaseMaterial")]
+        public List<Purchased_Material> GetAllCloudPurchaseMaterial()
+        {
+            return _Localdb.Purchased_Material.ToList();
+        }
+
+        [HttpPost("AddCloudPurchaseMaterial")]
+        public ActionResult<Purchased_Material> AddCloudPurchaseMaterial([FromBody] Purchased_Material purchased_material)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _Localdb.Purchased_Material.Add(purchased_material);
+            _Localdb.SaveChanges();
+            return Ok(purchased_material);
+        }
+
+        [HttpPost("UpdateCloudPurchaseMaterial")]
+        public ActionResult<Purchased_Material> UpdateCloudPurchaseMaterial([FromBody] Purchased_Material purchased_material)
+        {
+            if (purchased_material == null)
+            {
+                return BadRequest(purchased_material);
+            }
+
+            var _purchased_material = _Localdb.Purchased_Material.FirstOrDefault(x => x.Purchased_ID == purchased_material.Purchased_ID);
+            if (_purchased_material == null)
+            {
+                return NotFound();
+            }
+
+            _purchased_material.Purchased_ID = purchased_material.Purchased_ID;
+            _purchased_material.Date_Received_Item = purchased_material.Date_Received_Item;
+            _purchased_material.SI_Date = purchased_material.SI_Date;
+            _purchased_material.SI_No = purchased_material.SI_No;
+            _purchased_material.Supplier_Name = purchased_material.Supplier_Name;
+            _purchased_material.Remarks = purchased_material.Remarks;
+            _purchased_material.Quantity = purchased_material.Quantity;
+            _purchased_material.Unit_price = purchased_material.Unit_price;
+            _purchased_material.Amount = purchased_material.Amount;
+            _purchased_material.Material_ID = purchased_material.Material_ID;
+            _Localdb.SaveChanges();
+
+            return Ok(_purchased_material);
+        }
+
+        [HttpPut("DeleteCloudPurchaseMaterial")]
+        public ActionResult<Purchased_Material> DeleteCloudPurchaseMaterial(Int32 Id)
+        {
+
+            var purchased_material = _Localdb.Purchased_Material.FirstOrDefault(x => x.Purchased_ID == Id);
+            if (purchased_material == null)
+            {
+                return NotFound();
+            }
+            _Localdb.Remove(purchased_material);
+            _Localdb.SaveChanges();
+
+            return NoContent();
+        }
+
+        // --------------------------- PURCHASE MATERIAL ---------------------------
+
         // --------------------------- MATERIALS REQUESITION SLIP ---------------------------
 
         [HttpGet("GetLocalMaterialRequesitionSlips")]
         public List<MaterialRequesition_Slip> GetAllLocalMaterialRequesitionSlips()
         {
-            return _Localdb.MaterailsRequisition_Slip.ToList();
+            return _Localdb.MaterialRequisition_Slip.ToList();
         }
 
         [HttpGet("GetLocalMaterialRequesitionSlipsByID")]
@@ -169,7 +405,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var materialRequesitionSlip = _Localdb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
+            var materialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
             if (materialRequesitionSlip == null)
             {
                 return NotFound();
@@ -196,7 +432,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
-            var updateMaterialRequesitionSlip = _Localdb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == Id);
+            var updateMaterialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == Id);
             if (updateMaterialRequesitionSlip == null)
             {
                 return NotFound();
@@ -215,6 +451,7 @@ namespace APINIMIRHEMAA.Controllers
             updateMaterialRequesitionSlip.Approved_By = materialRequesitionSlip.Approved_By;
             updateMaterialRequesitionSlip.Submmited_By = materialRequesitionSlip.Submmited_By;
             updateMaterialRequesitionSlip.Received_By = materialRequesitionSlip.Received_By;
+            updateMaterialRequesitionSlip.Status = materialRequesitionSlip.Status;
 
             _Localdb.SaveChanges();
             return Ok(updateMaterialRequesitionSlip);
@@ -223,7 +460,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPut("DeleteLocalMaterialRequesitionSlip")]
         public ActionResult<MaterialRequesition_Slip> DeleteLocalMaterialRequesitionSlip(int id)
         {
-            var materialRequesitionSlip = _Localdb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
+            var materialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
             if (materialRequesitionSlip == null)
             {
                 return NotFound();

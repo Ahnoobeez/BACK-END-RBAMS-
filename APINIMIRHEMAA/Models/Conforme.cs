@@ -10,6 +10,7 @@ namespace APINIMIRHEMAA.Models
         public string FileExtension { get; set; }
         public Byte[] FIleData { get; set; }
         public int Quotation_ID { get; set; }
+        public string Status { get; set; }
 
     }
 }

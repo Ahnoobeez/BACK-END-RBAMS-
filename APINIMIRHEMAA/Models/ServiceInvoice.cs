@@ -10,6 +10,6 @@ namespace APINIMIRHEMAA.Models
         public string Description { get; set; }
         public int Unit_Price { get; set; }
         public int Amount { get; set; }
-
+        public string Status { get; set; }
     }
 }
