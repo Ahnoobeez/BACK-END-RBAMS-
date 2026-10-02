@@ -24,24 +24,24 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-
+                .FirstOrDefaultAsync(u => u.Email == request.Email);
             var identifier = request.Username?.Trim() ?? "";
-
+                });
             var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.Username == identifier || u.Email == identifier);
-
+                    request.Password,
             // Same message for every failure so attackers can't tell which part was wrong
             if (user == null || !user.IsActive ||
                 !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+
+            // 4. Password is incorrect
+            if (!passwordValid)
             {
-                return Unauthorized(new { message = "Invalid username or password." });
+            var role = await _context.Roles
             }
 
-            var role = await _context.Roles
-                .FirstOrDefaultAsync(r => r.Role_ID == user.Role_ID);
-            var department = await _context.Departments
-                .FirstOrDefaultAsync(d => d.Department_ID == user.Department_ID);
-
+            // 5. Get the user's role
+            var role = await _Localdb.Roles
             if (role == null || department == null)
                 return Unauthorized(new { message = "Account is not fully configured." });
 
@@ -49,6 +49,10 @@ namespace APINIMIRHEMAA.Controllers
                 user.User_ID, user.Username, role.Role_Name, department.Department_Name);
 
             var modules = ModuleAccess.GetModules(role.Role_Name, department.Department_Name);
+
+            // 6. Get the user's department
+            var department = await _Localdb.Departments
+                .FirstOrDefaultAsync(d => d.Department_ID == user.Department_ID);
 
             return Ok(new
             {
