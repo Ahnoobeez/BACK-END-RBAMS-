@@ -85,13 +85,9 @@ builder.Services.AddScoped<EncryptionService>();
 
 var app = builder.Build();
 
-
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
     app.UseSwagger();
     app.UseSwaggerUI();
-}
+
 
 app.UseCors("FrontendPolicy");
 
@@ -102,5 +98,12 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+app.MapGet("/", () => Results.Ok(new
+{
+    status = "online",
+    application = "MIRHEMA RBAMS API",
+    version = "1.0"
+}));
 
 app.Run();
