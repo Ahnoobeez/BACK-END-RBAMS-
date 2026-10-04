@@ -31,5 +31,7 @@ namespace APINIMIRHEMAA.Controllers
         {
             return _Clouddb.AuditTrail.ToList();
         }
+
+
     }
 }
