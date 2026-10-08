@@ -1,7 +1,9 @@
 using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
- 
+using System.IO;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -30,7 +32,16 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddDataProtection();
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(
+        new DirectoryInfo(
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ASP.NET",
+                "DataProtection-Keys"
+            )
+        )
+    );
 builder.Services.AddScoped<EncryptionService>();
 
 var app = builder.Build();
