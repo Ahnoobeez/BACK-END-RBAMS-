@@ -3,9 +3,11 @@ using APINIMIRHEMAA.Models;
 using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace APINIMIRHEMAA.Controllers
 {
+    [Authorize(Policy = "marketing")]
     [Route("api/[controller]")]
     [ApiController]
     public class MarketingController : ControllerBase

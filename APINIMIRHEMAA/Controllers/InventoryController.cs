@@ -1,10 +1,12 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APINIMIRHEMAA.Controllers
 {
+    [Authorize(Policy = "warehouse")]
     [Route("api/[controller]")]
     [ApiController]
     public class InventoryController : ControllerBase
@@ -175,7 +177,6 @@ namespace APINIMIRHEMAA.Controllers
             _inventory.Request = inventory.Request;
             _inventory.Returned = inventory.Returned;
             _inventory.Balance = inventory.Balance;
-            _inventory.Available_Balance = inventory.Available_Balance;
             _inventory.Status = inventory.Status;
             _inventory.Material_ID = inventory.Material_ID;
             _Localdb.SaveChanges();
@@ -237,7 +238,6 @@ namespace APINIMIRHEMAA.Controllers
             _inventory.Request = inventory.Request;
             _inventory.Returned = inventory.Returned;
             _inventory.Balance = inventory.Balance;
-            _inventory.Available_Balance = inventory.Available_Balance;
             _inventory.Status = inventory.Status;
             _inventory.Material_ID = inventory.Material_ID;
             _CloudDb.SaveChanges();

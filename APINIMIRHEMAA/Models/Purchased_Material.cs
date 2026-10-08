@@ -12,8 +12,8 @@ namespace APINIMIRHEMAA.Models
         public string Supplier_Name { get; set; }
         public string Remarks { get; set; }
         public int Quantity { get; set; }
-        public float Unit_price { get; set; }
-        public float Amount { get; set; }
+        public int Unit_price { get; set; }
+        public int Amount { get; set; }
         public int Material_ID { get; set; }
     }
 }

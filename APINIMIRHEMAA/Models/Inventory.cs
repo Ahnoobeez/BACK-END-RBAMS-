@@ -12,7 +12,6 @@ namespace APINIMIRHEMAA.Models
         public int Request { get; set; }
         public int Returned { get; set; }
         public int Balance { get; set; }
-        public int Available_Balance { get; set; }
         public string Status { get; set; }
         public int Material_ID { get; set; }
 

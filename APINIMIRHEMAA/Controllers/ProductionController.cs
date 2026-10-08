@@ -1,21 +1,26 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace APINIMIRHEMAA.Controllers
 {
+    [Authorize(Policy = "production")]
     [Route("api/[controller]")]
     [ApiController]
     public class ProductionController : ControllerBase
     {
         private LocalDbContext _Localdb;
         private CloudDbContext _CloudDb;
+        private readonly EncryptionService _encryptionService;
 
-        public ProductionController(LocalDbContext Localcontext, CloudDbContext Cloudcontext)
+        public ProductionController(LocalDbContext Localcontext, CloudDbContext Cloudcontext, EncryptionService encryptionService)
         {
             _Localdb = Localcontext;
             _CloudDb = Cloudcontext;
+            _encryptionService = encryptionService;
         }
 
         // ----------------------------------- JOB ORDER -----------------------------------
@@ -613,6 +618,51 @@ namespace APINIMIRHEMAA.Controllers
 
         // --------------------------- MATERIALS REQUESITION SLIP ---------------------------
 
+        [HttpGet("GetLocalClientsProject")]
+        public List<ClientsProject> GetAllLocalClientsProject()
+        {
+            var projects = _Localdb.ClientsProject.ToList();
+
+            foreach (var project in projects)
+            {
+                project.Attention = _encryptionService.Decrypt(project.Attention);
+                project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
+                project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
+                project.Representative = _encryptionService.Decrypt(project.Representative);
+                project.Contact_Person = _encryptionService.Decrypt(project.Contact_Person);
+                project.Account_Executive = _encryptionService.Decrypt(project.Account_Executive);
+            }
+
+            return projects;
+        }
+
+        [HttpGet("GetLocalQuotations")]
+        public List<Quotation> GetAllLocalQuotations()
+        {
+            return _Localdb.Quotation.ToList();
+        }
+
+        [HttpGet("GetLocalConforme")]
+        public List<Conforme> GetAllLocalConforme()
+        {
+            var conforme = _Localdb.Conforme.ToList();
+
+            foreach (var _conforme in conforme)
+            {
+                _conforme.FIleData = _encryptionService.Decrypt(_conforme.FIleData);
+
+            }
+
+            return conforme;
+
+
+        }
+
+        [HttpGet("GetAllLocalClients")]
+        public List<ClientEntity> GetAllLocalClients()
+        {
+            return _Localdb.Clients.ToList();
+        }
 
     }
 }

@@ -13,5 +13,6 @@ namespace APINIMIRHEMAA.Models
         public int Role_ID { get; set; }
         public int Department_ID { get; set; }
         public bool IsActive { get; set; }
+
     }
 }
