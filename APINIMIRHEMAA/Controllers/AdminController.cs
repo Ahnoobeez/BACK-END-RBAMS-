@@ -32,6 +32,22 @@ namespace APINIMIRHEMAA.Controllers
             return _Clouddb.AuditTrail.ToList();
         }
 
+        [HttpGet("GetLocalEmployees")]
+        public List<Employee> GetAllLocalEmployee()
+        {
+            return _Localdb.Employee.ToList();
+        }
 
+        [HttpGet("GetLocalRoles")]
+        public List<Roles> GetAllLocalRoles()
+        {
+            return _Localdb.Roles.ToList();
+        }
+
+        [HttpGet("GetLocalDeparments")]
+        public List<Departments> GetAllLocalDepartments()
+        {
+            return _Localdb.Departments.ToList();
+        }
     }
 }
