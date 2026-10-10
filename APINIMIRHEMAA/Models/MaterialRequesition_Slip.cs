@@ -5,6 +5,8 @@ namespace APINIMIRHEMAA.Models
     public class MaterialRequesition_Slip
     {
         [Key]
+        public int MR_ID { get; set; }
+        public int Material_ID { get; set; }
         public int Control_Number { get; set; }
         public DateOnly Date { get; set; }
         public string FromWho { get; set; }

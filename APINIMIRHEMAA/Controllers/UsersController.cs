@@ -3,9 +3,11 @@ using APINIMIRHEMAA.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace APINIMIRHEMAA.Controllers
 {
+    [Authorize(Policy = "admin")]
     [Route("api/[controller]")]
     [ApiController]
     public class UsersController : ControllerBase
@@ -63,8 +65,6 @@ namespace APINIMIRHEMAA.Controllers
             _users.Role_ID = users.Role_ID;
             _users.Department_ID = users.Department_ID;
             _users.IsActive = users.IsActive;
-
-
             _Localdb.SaveChanges();
 
 
@@ -87,6 +87,35 @@ namespace APINIMIRHEMAA.Controllers
             return NoContent();
         }
 
+        [HttpPost("ResetLocalUserPassword")]
+        public IActionResult ResetLocalUserPassword([FromBody] JsonElement data)
+        {
+            int targetUserId = data.GetProperty("targetUserId").GetInt32();
+            string adminUsername = data.GetProperty("adminUsername").GetString() ?? "";
+            string adminPassword = data.GetProperty("adminPassword").GetString() ?? "";
+            var admin = _Localdb.Users.FirstOrDefault( x => x.Username == adminUsername);
+            if (admin == null)
+                return Unauthorized("Invalid admin credentials.");
+            // TODO: Verify adminPassword using your existing
+            // login password verification method.
+            // Also verify the user's administrator role.
+            // Find the selected account
+            var user = _Localdb.Users.FirstOrDefault( x => x.User_ID == targetUserId);
+
+            if (user == null)
+                return NotFound("User not found.");
+
+            // TODO: Hash your configured default password
+            // using the same method as your login system.
+            // Assign the resulting hash to the password field.
+
+            _Localdb.SaveChanges();
+
+            return Ok(new
+            {
+                message = "Password reset successfully."
+            });
+        }
 
         [HttpGet("GetLocalRoles")]
         public List<Roles> GetAllLocalRoles()

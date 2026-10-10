@@ -11,8 +11,6 @@ namespace APINIMIRHEMAA.Mappers
             {
                 AuditTrail_ID = _AuditTrailModel.AuditTrail_ID,
                 Name = _AuditTrailModel.Name,
-                Date = _AuditTrailModel.Date,
-                Time = _AuditTrailModel.Time,
                 Action = _AuditTrailModel.Action,
                 Department = _AuditTrailModel.Department
             };
