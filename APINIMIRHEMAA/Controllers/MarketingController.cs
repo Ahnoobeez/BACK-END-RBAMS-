@@ -770,22 +770,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateJobOrder.JobOrder_ID = _jobOrder.JobOrder_ID;
-            updateJobOrder.Conforme_FileID = _jobOrder.Conforme_FileID;
-            updateJobOrder.Title = _jobOrder.Title;
-            updateJobOrder.Quantity = _jobOrder.Quantity;
-            updateJobOrder.Width = _jobOrder.Width;
-            updateJobOrder.Length = _jobOrder.Length;
-            updateJobOrder.Artist_Initial = _jobOrder.Artist_Initial;
-            updateJobOrder.Production_Initial = _jobOrder.Production_Initial;
-            updateJobOrder.Remarks = _jobOrder.Remarks;
+
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
-            updateJobOrder.Tiling = _jobOrder.Tiling;
-            updateJobOrder.Eyelet = _jobOrder.Eyelet;
-            updateJobOrder.Bleeding = _jobOrder.Bleeding;
-
+            updateJobOrder.Comment = _jobOrder.Comment;
 
             _CloudDb.SaveChanges();
             return Ok(updateJobOrder);
@@ -805,6 +794,149 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         // ------------------------------- JOB ORDER -------------------------------
+
+        // ------------------------------- JOB ORDER ITEMS -------------------------------
+
+        [HttpGet("GetLocalJobOrderItems")]
+        public List<JobOrderItems> GetAllJobOrderItems()
+        {
+            return _Localdb.JobOrderItems.ToList();
+        }
+
+        [HttpGet("GetLocalJobOrderItemsByID")]
+        public ActionResult<JobOrderItems> GetLocalJobOrderItemsByID(int id)
+        {
+            if (id == 0)
+            {
+                return BadRequest("Invalid client ID.");
+            }
+            var jobOrder = _Localdb.JobOrderItems.FirstOrDefault(x => x.JobOrderItems_ID == id);
+            if (jobOrder == null)
+            {
+                return NotFound();
+            }
+            return Ok(jobOrder);
+        }
+
+        [HttpPost("AddLocalJobOrderItems")]
+        public ActionResult<JobOrderItems> AddLocalJobOrderItems(JobOrderItems jobOrderItems)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _Localdb.Add(jobOrderItems);
+            _Localdb.SaveChanges();
+            return Ok(jobOrderItems);
+        }
+
+        [HttpPost("UpdateLocalJobOrderItems")]
+        public ActionResult<JobOrderItems> UpdateLocalJobOrder(Int32 Id, [FromBody] JobOrderItems _jobOrderItems)
+        {
+            if (_jobOrderItems == null)
+            {
+                return BadRequest(_jobOrderItems);
+            }
+            var updateJobOrderItems = _Localdb.JobOrderItems.FirstOrDefault(x => x.JobOrderItems_ID == Id);
+            if (updateJobOrderItems == null)
+            {
+                return NotFound();
+            }
+
+            updateJobOrderItems.Production_Initial = _jobOrderItems.Production_Initial;
+            updateJobOrderItems.Artist_Initial = _jobOrderItems.Artist_Initial;
+            updateJobOrderItems.Remarks = _jobOrderItems.Remarks;
+
+
+            _Localdb.SaveChanges();
+            return Ok(updateJobOrderItems);
+        }
+
+        [HttpPut("DeleteLocalJobOrderItems")]
+        public ActionResult<JobOrderItems> DeleteLocalJobOrderItems(int id)
+        {
+            var jobOrderItems = _Localdb.JobOrderItems.FirstOrDefault(x => x.JobOrderItems_ID == id);
+            if (jobOrderItems == null)
+            {
+                return NotFound();
+            }
+            _Localdb.Remove(jobOrderItems);
+            _Localdb.SaveChanges();
+            return NoContent();
+        }
+
+
+        [HttpGet("GetCloudJobOrderItems")]
+        public List<JobOrderItems> GetAllCloudJobOrderItems()
+        {
+            return _Localdb.JobOrderItems.ToList();
+        }
+
+        [HttpGet("GetCloudJobOrderItemsByID")]
+        public ActionResult<JobOrderItems> GetCloudJobOrderItemsByID(int id)
+        {
+            if (id == 0)
+            {
+                return BadRequest("Invalid client ID.");
+            }
+            var jobOrder = _CloudDb.JobOrderItems.FirstOrDefault(x => x.JobOrderItems_ID == id);
+            if (jobOrder == null)
+            {
+                return NotFound();
+            }
+            return Ok(jobOrder);
+        }
+
+        [HttpPost("AddCloudJobOrderItems")]
+        public ActionResult<JobOrderItems> AddCloudJobOrderItems(JobOrderItems jobOrderItems)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _CloudDb.Add(jobOrderItems);
+            _CloudDb.SaveChanges();
+            return Ok(jobOrderItems);
+        }
+
+        [HttpPost("UpdateCloudJobOrderItems")]
+        public ActionResult<JobOrderItems> UpdateCloudJobOrderItems(Int32 Id, [FromBody] JobOrderItems _jobOrderItems)
+        {
+            if (_jobOrderItems == null)
+            {
+                return BadRequest(_jobOrderItems);
+            }
+            var updateJobOrderItems = _CloudDb.JobOrderItems.FirstOrDefault(x => x.JobOrderItems_ID == Id);
+            if (updateJobOrderItems == null)
+            {
+                return NotFound();
+            }
+
+            updateJobOrderItems.Production_Initial = _jobOrderItems.Production_Initial;
+            updateJobOrderItems.Artist_Initial = _jobOrderItems.Artist_Initial;
+            updateJobOrderItems.Remarks = _jobOrderItems.Remarks;
+
+
+
+            _CloudDb.SaveChanges();
+            return Ok(updateJobOrderItems);
+        }
+
+        [HttpPut("DeleteCloudJobOrderItems")]
+        public ActionResult<JobOrderItems> DeleteCloudJobOrderItems(int id)
+        {
+            var jobOrderItems = _CloudDb.JobOrderItems.FirstOrDefault(x => x.JobOrderItems_ID == id);
+            if (jobOrderItems == null)
+            {
+                return NotFound();
+            }
+            _CloudDb.Remove(jobOrderItems);
+            _CloudDb.SaveChanges();
+            return NoContent();
+        }
+
+        // ------------------------------- JOB ORDER ITEMS -------------------------------
+
 
         // ------------------------------- PURCHASE ORDER -------------------------------
 
@@ -1273,6 +1405,7 @@ namespace APINIMIRHEMAA.Controllers
             updateInstallationSchedule.Remarks = installationSchedule.Remarks;
             updateInstallationSchedule.Mall_Hours = installationSchedule.Mall_Hours;
             updateInstallationSchedule.Date = installationSchedule.Date;
+            updateInstallationSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
             _Localdb.SaveChanges();
             return Ok(updateInstallationSchedule);
         }
@@ -1340,6 +1473,7 @@ namespace APINIMIRHEMAA.Controllers
             updateInstallationSchedule.Remarks = installationSchedule.Remarks;
             updateInstallationSchedule.Mall_Hours = installationSchedule.Mall_Hours;
             updateInstallationSchedule.Date = installationSchedule.Date;
+            updateInstallationSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
             _CloudDb.SaveChanges();
             return Ok(updateInstallationSchedule);
         }

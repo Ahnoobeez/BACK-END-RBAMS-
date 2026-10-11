@@ -35,7 +35,7 @@ namespace APINIMIRHEMAA.Data
         public DbSet<Quotation_Items> Quotation_Items { get; set; }
         public DbSet<Quotation_Store> Quotation_Store { get; set; }
         public DbSet<Employee> Employee { get; set; }
-
+        public DbSet<JobOrderItems> JobOrderItems { get; set; }
 
     }
 }

@@ -374,6 +374,8 @@ namespace APINIMIRHEMAA.Controllers
             updateInstallationSchedule.Remarks = installationSchedule.Remarks;
             updateInstallationSchedule.Mall_Hours = installationSchedule.Mall_Hours;
             updateInstallationSchedule.Date = installationSchedule.Date;
+            updateInstallationSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
+
             _Localdb.SaveChanges();
             return Ok(updateInstallationSchedule);
         }
@@ -441,6 +443,7 @@ namespace APINIMIRHEMAA.Controllers
             updateInstallationSchedule.Remarks = installationSchedule.Remarks;
             updateInstallationSchedule.Mall_Hours = installationSchedule.Mall_Hours;
             updateInstallationSchedule.Date = installationSchedule.Date;
+            updateInstallationSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
             _CloudDb.SaveChanges();
             return Ok(updateInstallationSchedule);
         }
@@ -663,6 +666,8 @@ namespace APINIMIRHEMAA.Controllers
         {
             return _Localdb.Clients.ToList();
         }
+
+
 
     }
 }

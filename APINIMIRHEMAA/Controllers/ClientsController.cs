@@ -69,7 +69,8 @@ namespace APINIMIRHEMAA.Controllers
 
             clientDetails.Client_Name = ClientDetails.Client_Name;
             clientDetails.Client_Telephone = ClientDetails.Client_Telephone;
-            clientDetails.Client_Address = ClientDetails.Client_Address;
+            clientDetails.TermsAndCondition = ClientDetails.TermsAndCondition;
+            clientDetails.Company_Address = ClientDetails.Company_Address;
             clientDetails.TIN = ClientDetails.TIN;
             clientDetails.Payment_Terms = ClientDetails.Payment_Terms;
 
@@ -144,7 +145,8 @@ namespace APINIMIRHEMAA.Controllers
 
             clientDetails.Client_Name = ClientDetails.Client_Name;
             clientDetails.Client_Telephone = ClientDetails.Client_Telephone;
-            clientDetails.Client_Address = ClientDetails.Client_Address;
+            clientDetails.TermsAndCondition = ClientDetails.TermsAndCondition;
+            clientDetails.Company_Address = ClientDetails.Company_Address;
             clientDetails.TIN = ClientDetails.TIN;
             clientDetails.Payment_Terms = ClientDetails.Payment_Terms;
 

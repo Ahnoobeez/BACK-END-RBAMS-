@@ -11,9 +11,9 @@ namespace APINIMIRHEMAA.Models
         [Required]
         public int Client_Telephone { get; set; }
         [Required]
-        public string Client_Address { get; set; }
-        [Required]
-        public string TIN { get; set; }
-        public string Payment_Terms { get; set; }
+        public string? TermsAndCondition { get; set; }
+        public string? Company_Address { get; set; }
+        public string? TIN { get; set; }
+        public string? Payment_Terms { get; set; }
     }
 }

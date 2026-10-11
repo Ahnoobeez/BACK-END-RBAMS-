@@ -32,6 +32,7 @@ namespace APINIMIRHEMAA.Data
         public DbSet<Departments> Departments { get; set; }
         public DbSet<Inventory> Inventory { get; set; }
         public DbSet<Purchased_Material> Purchased_Material { get; set; }
+        public DbSet<JobOrderItems> JobOrderItems { get; set; }
 
     }
 }
