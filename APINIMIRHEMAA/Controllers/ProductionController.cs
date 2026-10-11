@@ -475,7 +475,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var materialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
+            var materialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.MR_ID == id);
             if (materialRequesitionSlip == null)
             {
                 return NotFound();
@@ -502,7 +502,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
-            var updateMaterialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == Id);
+            var updateMaterialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.MR_ID == Id);
             if (updateMaterialRequesitionSlip == null)
             {
                 return NotFound();
@@ -529,7 +529,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPut("DeleteLocalMaterialRequesitionSlip")]
         public ActionResult<MaterialRequesition_Slip> DeleteLocalMaterialRequesitionSlip(int id)
         {
-            var materialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
+            var materialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.MR_ID == id);
             if (materialRequesitionSlip == null)
             {
                 return NotFound();
@@ -552,7 +552,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var materialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
+            var materialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.MR_ID == id);
             if (materialRequesitionSlip == null)
             {
                 return NotFound();
@@ -579,7 +579,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
-            var updateMaterialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == Id);
+            var updateMaterialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.MR_ID == Id);
             if (updateMaterialRequesitionSlip == null)
             {
                 return NotFound();
@@ -606,7 +606,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPut("DeleteCloudMaterialRequesitionSlip")]
         public ActionResult<MaterialRequesition_Slip> DeleteCloudMaterialRequesitionSlip(int id)
         {
-            var materialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.Control_Number == id);
+            var materialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.MR_ID == id);
             if (materialRequesitionSlip == null)
             {
                 return NotFound();

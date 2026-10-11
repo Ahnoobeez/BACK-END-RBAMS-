@@ -256,19 +256,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateQuotation.Quotation_ID = UpdateQuotation.Quotation_ID;
-            updateQuotation.Project_ID = UpdateQuotation.Project_ID;
-            updateQuotation.Title = UpdateQuotation.Title;
-            updateQuotation.Sub_Total = UpdateQuotation.Sub_Total;
-            updateQuotation.Less_Discount = UpdateQuotation.Less_Discount;
-            updateQuotation.Ingress_and_Engress = UpdateQuotation.Ingress_and_Engress;
-            updateQuotation.Overall_Total = UpdateQuotation.Overall_Total;
+
             updateQuotation.Status = UpdateQuotation.Status;
-            updateQuotation.Comment = UpdateQuotation.Comment;
-            updateQuotation.Terms_Condition = UpdateQuotation.Terms_Condition;
-            updateQuotation.Start_Date = UpdateQuotation.Start_Date;
-            updateQuotation.Time = UpdateQuotation.Time;
-            updateQuotation.End_Date = UpdateQuotation.End_Date;
 
             _Localdb.SaveChanges();
             return Ok(UpdateQuotation);
@@ -576,10 +565,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateConforme.FileName = _conforme.FileName;
-            updateConforme.FileExtension = _conforme.FileExtension;
-            updateConforme.FIleData = _conforme.FIleData;
-            updateConforme.Quotation_ID = _conforme.Quotation_ID;
+
             updateConforme.Status = _conforme.Status;
 
             _Localdb.SaveChanges();
@@ -717,21 +703,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateJobOrder.JobOrder_ID = _jobOrder.JobOrder_ID;
-            updateJobOrder.Conforme_FileID = _jobOrder.Conforme_FileID;
-            updateJobOrder.Title = _jobOrder.Title;
-            updateJobOrder.Quantity = _jobOrder.Quantity;
-            updateJobOrder.Width = _jobOrder.Width;
-            updateJobOrder.Length = _jobOrder.Length;
-            updateJobOrder.Artist_Initial = _jobOrder.Artist_Initial;
-            updateJobOrder.Production_Initial = _jobOrder.Production_Initial;
-            updateJobOrder.Remarks = _jobOrder.Remarks;
-            updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
-            updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
-            updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
-            updateJobOrder.Tiling = _jobOrder.Tiling;
-            updateJobOrder.Eyelet = _jobOrder.Eyelet;
-            updateJobOrder.Bleeding = _jobOrder.Bleeding;
+
             updateJobOrder.Status = _jobOrder.Status;
 
 
@@ -881,10 +853,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updatePurchaseOrder.Conforme_FileID = _purchaseOrder.Conforme_FileID;
-            updatePurchaseOrder.FileName = _purchaseOrder.FileName;
-            updatePurchaseOrder.FileExtension = _purchaseOrder.FileExtension;
-            updatePurchaseOrder.FileData = _purchaseOrder.FileData;
+
             updatePurchaseOrder.Status = _purchaseOrder.Status;
 
             _Localdb.SaveChanges();
@@ -1437,10 +1406,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateDeliveryReceipt.Delivery_ID = deliveryReceipt.Delivery_ID;
-            updateDeliveryReceipt.Title = deliveryReceipt.Title;
-            updateDeliveryReceipt.Quantity = deliveryReceipt.Quantity;
-            updateDeliveryReceipt.Description = deliveryReceipt.Description;
+
             updateDeliveryReceipt.Status = deliveryReceipt.Status;
 
             _Localdb.SaveChanges();
@@ -1717,11 +1683,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateCollectionReceipt.CollectionReceipt_ID = collectionReceipt.CollectionReceipt_ID;
-            updateCollectionReceipt.FileName = collectionReceipt.FileName;
-            updateCollectionReceipt.FileExtension = collectionReceipt.FileExtension;
-            updateCollectionReceipt.FileData = collectionReceipt.FileData;
-            updateCollectionReceipt.JobOrderID = collectionReceipt.JobOrderID;
+
             updateCollectionReceipt.Status = collectionReceipt.Status;
 
             _Localdb.SaveChanges();
