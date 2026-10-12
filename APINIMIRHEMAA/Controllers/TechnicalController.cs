@@ -67,21 +67,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateJobOrder.JobOrder_ID = _jobOrder.JobOrder_ID;
-            updateJobOrder.Conforme_FileID = _jobOrder.Conforme_FileID;
-            updateJobOrder.Title = _jobOrder.Title;
-            updateJobOrder.Quantity = _jobOrder.Quantity;
-            updateJobOrder.Width = _jobOrder.Width;
-            updateJobOrder.Length = _jobOrder.Length;
-            updateJobOrder.Artist_Initial = _jobOrder.Artist_Initial;
-            updateJobOrder.Production_Initial = _jobOrder.Production_Initial;
-            updateJobOrder.Remarks = _jobOrder.Remarks;
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
-            updateJobOrder.Tiling = _jobOrder.Tiling;
-            updateJobOrder.Eyelet = _jobOrder.Eyelet;
-            updateJobOrder.Bleeding = _jobOrder.Bleeding;
+            updateJobOrder.Comment = _jobOrder.Comment;
 
 
             _Localdb.SaveChanges();
@@ -147,22 +136,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateJobOrder.JobOrder_ID = _jobOrder.JobOrder_ID;
-            updateJobOrder.Conforme_FileID = _jobOrder.Conforme_FileID;
-            updateJobOrder.Title = _jobOrder.Title;
-            updateJobOrder.Quantity = _jobOrder.Quantity;
-            updateJobOrder.Width = _jobOrder.Width;
-            updateJobOrder.Length = _jobOrder.Length;
-            updateJobOrder.Artist_Initial = _jobOrder.Artist_Initial;
-            updateJobOrder.Production_Initial = _jobOrder.Production_Initial;
-            updateJobOrder.Remarks = _jobOrder.Remarks;
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
-            updateJobOrder.Tiling = _jobOrder.Tiling;
-            updateJobOrder.Eyelet = _jobOrder.Eyelet;
-            updateJobOrder.Bleeding = _jobOrder.Bleeding;
-
+            updateJobOrder.Comment = _jobOrder.Comment;
 
             _CloudDb.SaveChanges();
             return Ok(updateJobOrder);

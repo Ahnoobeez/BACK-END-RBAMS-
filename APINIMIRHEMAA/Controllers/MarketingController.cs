@@ -1,9 +1,11 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.Models;
 using APINIMIRHEMAA.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace APINIMIRHEMAA.Controllers
 {
@@ -235,10 +237,10 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPost("AddLocalQuotations")]
         public ActionResult<Quotation> AddLocalQuotations([FromBody] Quotation QuotationDetails)
         {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
+
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            QuotationDetails.User_ID = User.FindFirstValue(ClaimTypes.NameIdentifier);
             _Localdb.Quotation.Add(QuotationDetails);
             _Localdb.SaveChanges();
             return Ok(QuotationDetails);
@@ -251,7 +253,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(UpdateQuotation);
             }
-            var updateQuotation = _Localdb.Quotation.FirstOrDefault(x => x.Project_ID == Id);
+            var updateQuotation = _Localdb.Quotation.FirstOrDefault(x => x.Quotation_ID == Id);
             if (updateQuotation == null)
             {
                 return NotFound();
@@ -510,7 +512,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalConforme")]
         public List<Conforme> GetAllLocalConforme()
         {
-            var conforme = _Localdb.Conforme.ToList();
+            var conforme = _Localdb.Conforme.AsNoTracking().ToList();
 
             foreach (var _conforme in conforme)
             {
@@ -530,11 +532,9 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var conforme = _Localdb.Conforme.FirstOrDefault(x => x.FileID == id);
-            if (conforme == null)
-            {
-                return NotFound();
-            }
+            var conforme = _Localdb.Conforme.AsNoTracking().FirstOrDefault(x => x.FileID == id);
+            if (conforme == null) return NotFound();
+            conforme.FIleData = _encryptionService.TryDecrypt(conforme.FIleData);
             return Ok(conforme);
         }
 
@@ -553,8 +553,31 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(conforme);
         }
 
+        [HttpPost("AddLocalConformeBatch")]
+        [RequestSizeLimit(100_000_000)]
+        public ActionResult<List<int>> AddLocalConformeBatch([FromBody] List<Conforme> files)
+        {
+            if (files == null || files.Count == 0) return BadRequest("No files.");
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                var error = UploadValidator.ValidatePdf(files[i].FIleData);
+                if (error != null) return BadRequest($"File {i + 1}: {error}");
+            }
+
+            foreach (var f in files)
+            {
+                f.FIleData = _encryptionService.Encrypt(f.FIleData);
+                _Localdb.Conforme.Add(f);
+            }
+
+            _Localdb.SaveChanges();   // one call = all rows or none
+            return Ok(files.Select(f => f.FileID).ToList());
+        }
+
+
         [HttpPost ("UpdateLocalConforme")]
-        public ActionResult<Quotation> UpdateLocalConforme(Int32 Id, [FromBody] Conforme _conforme)
+        public ActionResult<Conforme> UpdateLocalConforme(Int32 Id, [FromBody] Conforme _conforme)
         {
             if (_conforme == null)
             {
@@ -943,7 +966,9 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalPurchaseOrder")]
         public List<PurchaseOrder> GetAllPurchaseOrder()
         {
-            return _Localdb.PurchaseOrder.ToList();
+            var list = _Localdb.PurchaseOrder.AsNoTracking().ToList();
+            foreach (var r in list) r.FileData = _encryptionService.TryDecrypt(r.FileData);
+            return list;
         }
 
         [HttpGet("GetLocalPurchaseOrderByID")]
@@ -953,24 +978,48 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var purchaseOrder = _Localdb.PurchaseOrder.FirstOrDefault(x => x.FileID == id);
-            if (purchaseOrder == null)
-            {
-                return NotFound();
-            }
+            var purchaseOrder = _Localdb.PurchaseOrder.AsNoTracking().FirstOrDefault(x => x.FileID == id);
+            if (purchaseOrder == null) return NotFound();
+            purchaseOrder.FileData = _encryptionService.TryDecrypt(purchaseOrder.FileData);
             return Ok(purchaseOrder);
         }
 
         [HttpPost("AddLocalPurchaseOrder")]
         public ActionResult<PurchaseOrder> AddLocalPurchaseOrder(PurchaseOrder purchaseOrder)
         {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-            _Localdb.Add(purchaseOrder);
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var error = UploadValidator.ValidatePdf(purchaseOrder.FileData);
+            if (error != null) return BadRequest(error);
+
+            var plain = purchaseOrder.FileData;
+            purchaseOrder.FileData = _encryptionService.Encrypt(plain);
+            _Localdb.PurchaseOrder.Add(purchaseOrder);
             _Localdb.SaveChanges();
+            purchaseOrder.FileData = plain;
             return Ok(purchaseOrder);
+        }
+
+        [HttpPost("AddLocalPurchaseOrderBatch")]
+        [RequestSizeLimit(100_000_000)]
+        public ActionResult<List<int>> AddLocalPurchaseOrderBatch([FromBody] List<PurchaseOrder> purchaseOrders)
+        {
+            if (purchaseOrders == null || purchaseOrders.Count == 0)
+                return BadRequest("No files.");
+
+            for (int i = 0; i < purchaseOrders.Count; i++)
+            {
+                var error = UploadValidator.ValidatePdf(purchaseOrders[i].FileData);
+                if (error != null) return BadRequest($"File {i + 1}: {error}");
+            }
+
+            foreach (var f in purchaseOrders)
+            {
+                f.FileData = _encryptionService.Encrypt(f.FileData);
+                _Localdb.PurchaseOrder.Add(f);
+            }
+            _Localdb.SaveChanges();
+            return Ok(purchaseOrders.Select(f => f.FileID).ToList());
         }
 
         [HttpPost("UpdateLocalPurchaseOrder")]
@@ -1079,7 +1128,9 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalGraphics")]
         public List<Graphics> GetAllGraphics()
         {
-            return _Localdb.Graphics.ToList();
+            var list = _Localdb.Graphics.AsNoTracking().ToList();
+            foreach (var r in list) r.FileData = _encryptionService.TryDecrypt(r.FileData);
+            return list;
         }
 
         [HttpGet("GetLocalGraphicsByID")]
@@ -1089,24 +1140,48 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var graphics = _Localdb.Graphics.FirstOrDefault(x => x.FileID == id);
-            if (graphics == null)
-            {
-                return NotFound();
-            }
+            var graphics = _Localdb.Graphics.AsNoTracking().FirstOrDefault(x => x.FileID == id);
+            if (graphics == null) return NotFound();
+            graphics.FileData = _encryptionService.TryDecrypt(graphics.FileData);
             return Ok(graphics);
         }
 
         [HttpPost("AddLocalGraphics")]
         public ActionResult<Graphics> AddLocalGraphics(Graphics graphics)
         {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-            _Localdb.Add(graphics);
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var error = UploadValidator.ValidatePdf(graphics.FileData);   // ValidateImage for Collection Receipt, ValidateImageOrPdf for Graphics, ValidateImage for Delivery Files
+            if (error != null) return BadRequest(error);
+
+            var plain = graphics.FileData;
+            graphics.FileData = _encryptionService.Encrypt(plain);
+            _Localdb.Graphics.Add(graphics);
             _Localdb.SaveChanges();
+            graphics.FileData = plain;
             return Ok(graphics);
+        }
+
+        [HttpPost("AddLocalGraphicsBatch")]
+        [RequestSizeLimit(100_000_000)]
+        public ActionResult<List<int>> AddLocalGraphicsBatch([FromBody] List<Graphics> graphicsFiles)
+        {
+            if (graphicsFiles == null || graphicsFiles.Count == 0)
+                return BadRequest("No files.");
+
+            for (int i = 0; i < graphicsFiles.Count; i++)
+            {
+                var error = UploadValidator.ValidateImageOrPdf(graphicsFiles[i].FileData);
+                if (error != null) return BadRequest($"File {i + 1}: {error}");
+            }
+
+            foreach (var f in graphicsFiles)
+            {
+                f.FileData = _encryptionService.Encrypt(f.FileData);
+                _Localdb.Graphics.Add(f);
+            }
+            _Localdb.SaveChanges();
+            return Ok(graphicsFiles.Select(f => f.FileID).ToList());
         }
 
         [HttpPost("UpdateLocalGraphics")]
@@ -1121,11 +1196,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateGraphics.Quotation_ID = _graphics.FileID;
-            updateGraphics.FileName = _graphics.FileName;
-            updateGraphics.FileExtension = _graphics.FileExtension;
-            updateGraphics.FileData = _graphics.FileData;
-            updateGraphics.Quotation_ID = _graphics.Quotation_ID;
+
+            updateGraphics.FileData = _encryptionService.Encrypt(_graphics.FileData);
 
             _Localdb.SaveChanges();
             return Ok(updateGraphics);
@@ -1606,10 +1678,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateDeliveryReceipt.Delivery_ID = deliveryReceipt.Delivery_ID;
-            updateDeliveryReceipt.Title = deliveryReceipt.Title;
-            updateDeliveryReceipt.Quantity = deliveryReceipt.Quantity;
-            updateDeliveryReceipt.Description = deliveryReceipt.Description;
+            updateDeliveryReceipt.Status = deliveryReceipt.Status;
             _CloudDb.SaveChanges();
             return Ok(updateDeliveryReceipt);
         }
@@ -1630,39 +1699,109 @@ namespace APINIMIRHEMAA.Controllers
 
         // ------------------------------- DELIVERY RECEIPT ---------------------------
 
-        // ------------------------------- DELIVERY FILES ---------------------------
+        // ------------------------------- DELIVERY RECEIPT ITEMS ---------------------------
 
-        [HttpGet("GetLocalDeliveryFiles")]
-        public List<DeliveryFiles> GetAllDeliveryFiles()
+        [HttpGet("GetLocalDeliveryReceiptsItems")]
+        public List<DeliveryReceiptItems> GetAllLocalDeliveryReceiptsItems()
         {
-            return _Localdb.DeliveryFiles.ToList();
+            return _Localdb.DeliveryReceiptItems.ToList();
         }
 
-        [HttpGet("GetLocalDeliveryFilesByID")]
-        public ActionResult<DeliveryFiles> GetLocalDeliveryFilesByID(int id)
+        [HttpGet("GetLocalDeliveryReceiptsItemsByID")]
+        public ActionResult<DeliveryReceiptItems> GetLocalDeliveryReceiptsItemsID(int id)
         {
             if (id == 0)
             {
                 return BadRequest("Invalid client ID.");
             }
-            var deliveryFiles = _Localdb.DeliveryFiles.FirstOrDefault(x => x.File_ID == id);
-            if (deliveryFiles == null)
+            var deliveryReceipt = _Localdb.DeliveryReceiptItems.FirstOrDefault(x => x.DeliveryReceiptItems_ID == id);
+            if (deliveryReceipt == null)
             {
                 return NotFound();
             }
+            return Ok(deliveryReceipt);
+        }
+
+        [HttpPost("AddLocalDeliveryReceiptsItems")]
+        public ActionResult<DeliveryReceiptItems> AddLocalDeliveryReceiptsItems(DeliveryReceiptItems deliveryReceiptItems)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+            _Localdb.Add(deliveryReceiptItems);
+            _Localdb.SaveChanges();
+            return Ok(deliveryReceiptItems);
+        }
+
+        [HttpPut("DeleteLocalDeliveryReceiptsItems")]
+        public ActionResult DeleteLocalDeliveryReceiptItems(int id)
+        {
+            var deliveryReceiptItems = _Localdb.DeliveryReceiptItems.FirstOrDefault(x => x.DeliveryReceiptItems_ID == id);
+            if (deliveryReceiptItems == null)
+            {
+                return NotFound();
+            }
+            _Localdb.Remove(deliveryReceiptItems);
+            _Localdb.SaveChanges();
+            return NoContent();
+        }
+        // ------------------------------- DELIVERY RECEIPT ITEMS---------------------------
+
+        // ------------------------------- DELIVERY FILES ---------------------------
+
+        [HttpGet("GetLocalDeliveryFiles")]
+        public List<DeliveryFiles> GetAllDeliveryFiles()
+        {
+            var list = _Localdb.DeliveryFiles.AsNoTracking().ToList();
+            foreach (var r in list) r.File_Data = _encryptionService.TryDecrypt(r.File_Data);
+            return list;
+        }
+
+        [HttpGet("GetLocalDeliveryFilesByID")]
+        public ActionResult<DeliveryFiles> GetLocalDeliveryFilesByID(int id)
+        {
+            var deliveryFiles = _Localdb.DeliveryFiles.AsNoTracking().FirstOrDefault(x => x.File_ID == id);
+            if (deliveryFiles == null) return NotFound();
+            deliveryFiles.File_Data = _encryptionService.TryDecrypt(deliveryFiles.File_Data);
             return Ok(deliveryFiles);
         }
 
         [HttpPost("AddLocalDeliveryFiles")]
         public ActionResult<DeliveryFiles> AddLocalDeliveryFiles(DeliveryFiles deliveryFiles)
         {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-            _Localdb.Add(deliveryFiles);
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            var error = UploadValidator.ValidatePdf(deliveryFiles.File_Data);   // ValidateImage for Collection Receipt, ValidateImageOrPdf for Graphics, ValidateImage for Delivery Files
+            if (error != null) return BadRequest(error);
+
+            var plain = deliveryFiles.File_Data;
+            deliveryFiles.File_Data = _encryptionService.Encrypt(plain);
+            _Localdb.DeliveryFiles.Add(deliveryFiles);
             _Localdb.SaveChanges();
+            deliveryFiles.File_Data = plain;
             return Ok(deliveryFiles);
+        }
+
+        [HttpPost("AddLocalDeliveryFilesBatch")]
+        [RequestSizeLimit(100_000_000)]
+        public ActionResult<List<int>> AddLocalDeliveryFilesBatch([FromBody] List<DeliveryFiles> files)
+        {
+            if (files == null || files.Count == 0) return BadRequest("No files.");
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                var error = UploadValidator.ValidateImage(files[i].File_Data);
+                if (error != null) return BadRequest($"File {i + 1}: {error}");
+            }
+
+            foreach (var f in files)
+            {
+                f.File_Data = _encryptionService.Encrypt(f.File_Data);
+                _Localdb.DeliveryFiles.Add(f);
+            }
+            _Localdb.SaveChanges();
+            return Ok(files.Select(f => f.File_ID).ToList());
         }
 
         [HttpPost("UpdateLocalDeliveryFiles")]
@@ -1677,12 +1816,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateDeliveryFiles.File_ID = deliveryFiles.File_ID;
-            updateDeliveryFiles.Delivery_ID = deliveryFiles.Delivery_ID;
-            updateDeliveryFiles.File_Role = deliveryFiles.File_Role;
-            updateDeliveryFiles.File_Name = deliveryFiles.File_Name;
-            updateDeliveryFiles.File_Extension = deliveryFiles.File_Extension;
-            updateDeliveryFiles.File_Data = deliveryFiles.File_Data;
+            updateDeliveryFiles.File_Data = _encryptionService.Encrypt(deliveryFiles.File_Data);
             _Localdb.SaveChanges();
             return Ok(updateDeliveryFiles);
         }
@@ -1803,6 +1937,23 @@ namespace APINIMIRHEMAA.Controllers
             _Localdb.Add(collectionReceipt);
             _Localdb.SaveChanges();
             return Ok(collectionReceipt);
+        }
+
+        [HttpPost("AddLocalCollectionReceiptBatch")]
+        [RequestSizeLimit(100_000_000)]
+        public ActionResult<List<int>> AddLocalCollectionReceiptBatch([FromBody] List<CollectionReceipt> collectionReceiptsFiles)
+        {
+            if (collectionReceiptsFiles == null || collectionReceiptsFiles.Count == 0) return BadRequest("No files.");
+            for (int i = 0; i < collectionReceiptsFiles.Count; i++)
+
+            {
+                var error = UploadValidator.ValidateImage(collectionReceiptsFiles[i].FileData);
+                if (error != null) return BadRequest($"File {i + 1}: {error}");
+            }
+
+            _Localdb.CollectionReceipt.AddRange(collectionReceiptsFiles);
+            _Localdb.SaveChanges();
+            return Ok(collectionReceiptsFiles.Select(f => f.CollectionReceipt_ID).ToList());
         }
 
         [HttpPost("UpdateLocalCollectionReceipt")]
@@ -2048,6 +2199,45 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         // ------------------------------- ISSUED BY ---------------------------
+
+        [Authorize(Policy = "admin")]   // adjust to your admin policy name
+        [HttpPost("EncryptExistingFiles")]
+        public IActionResult EncryptExistingFiles()
+        {
+            var result = new
+            {
+                PurchaseOrder = EncryptTable(_Localdb.PurchaseOrder, x => x.FileID, x => x.FileData, (x, d) => x.FileData = d),
+                Graphics = EncryptTable(_Localdb.Graphics, x => x.FileID, x => x.FileData, (x, d) => x.FileData = d),
+                DeliveryFiles = EncryptTable(_Localdb.DeliveryFiles, x => x.File_ID, x => x.File_Data, (x, d) => x.File_Data = d),
+                CollectionReceipt = EncryptTable(_Localdb.CollectionReceipt, x => x.CollectionReceipt_ID, x => x.FileData, (x, d) => x.FileData = d)
+            };
+            return Ok(result);
+        }
+
+        private int EncryptTable<T>(
+            DbSet<T> set,
+            System.Linq.Expressions.Expression<Func<T, int>> idSelector,
+            Func<T, byte[]?> get,
+            Action<T, byte[]> put) where T : class
+        {
+            int count = 0;
+            var ids = set.AsNoTracking().Select(idSelector).ToList();
+
+            foreach (var id in ids)
+            {
+                var row = set.Find(id);
+                var data = row == null ? null : get(row);
+
+                if (row != null && data is { Length: > 0 } && !EncryptionService.IsProtected(data))
+                {
+                    put(row, _encryptionService.Encrypt(data));
+                    _Localdb.SaveChanges();
+                    count++;
+                }
+                _Localdb.ChangeTracker.Clear();
+            }
+            return count;
+        }
 
     }
 }

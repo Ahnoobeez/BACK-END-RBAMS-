@@ -16,5 +16,6 @@ namespace APINIMIRHEMAA.Models
         public string? Artist_Initial { get; set; }
         public string? Production_Initial { get; set; }
         public string? Remarks { get; set; }
+
     }
 }

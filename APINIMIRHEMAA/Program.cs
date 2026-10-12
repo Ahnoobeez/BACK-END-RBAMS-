@@ -58,9 +58,13 @@ builder.Services.AddAuthorization(options =>
 });
 
 builder.Services.AddScoped<JwtService>();
+builder.Services.AddScoped<PasswordService>();
+builder.Services.AddScoped<WorkflowService>();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddDbContext<LocalDbContext>(options =>
 options.UseSqlServer(builder.Configuration.GetConnectionString("LocalDatabase")));
@@ -95,9 +99,11 @@ builder.Services.AddScoped<EncryptionService>();
 
 var app = builder.Build();
 
+if (app.Environment.IsDevelopment())
+{
     app.UseSwagger();
     app.UseSwaggerUI();
-
+}
 
 app.UseCors("FrontendPolicy");
 

@@ -1,8 +1,12 @@
 ﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.DTO;
 using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace APINIMIRHEMAA.Controllers
@@ -14,61 +18,64 @@ namespace APINIMIRHEMAA.Controllers
     {
         private LocalDbContext _Localdb;
         private CloudDbContext _CloudDb;
-        public UsersController(LocalDbContext Localcontext, CloudDbContext Cloudcontext)
+        private readonly PasswordService _passwords;   // inject in the constructor
+        public UsersController(LocalDbContext Localcontext, CloudDbContext Cloudcontext, PasswordService Password)
         {
             _Localdb = Localcontext;
             _CloudDb = Cloudcontext;
+            _passwords = Password;
         }
 
         [HttpGet("GetLocalUsers")]
-        public List<Users> GetAllLocalUsers()
+        public ActionResult<List<UserListDto>> GetLocalUsers() =>
+        _Localdb.Users.AsNoTracking().Select(u => new UserListDto
         {
-            return _Localdb.Users.ToList();
-        }
+            User_ID = u.User_ID,
+            Username = u.Username,
+            Email = u.Email,
+            Employee_ID = u.Employee_ID,
+            Role_ID = u.Role_ID,
+            Department_ID = u.Department_ID,
+            IsActive = u.IsActive
+        }).ToList();
+
 
         [HttpPost("AddLocalUsers")]
-        public ActionResult<Users> AddLocalUsers([FromBody] Users users)
+        public ActionResult AddLocalUsers([FromBody] CreateUserDto dto)
         {
-            if (!ModelState.IsValid)
+            if (string.IsNullOrWhiteSpace(dto.Username) || dto.Password.Length < 8)
+                return BadRequest("Username and a password of at least 8 characters are required.");
+            if (_Localdb.Users.Any(u => u.Username == dto.Username))
+                return Conflict("That username already exists.");
+
+            var user = new Users
             {
-                return BadRequest(ModelState);
-            }
-
-            users.PasswordHash =
-                BCrypt.Net.BCrypt.HashPassword(users.PasswordHash);
-
-            _Localdb.Users.Add(users);
+                Username = dto.Username.Trim(),
+                Email = dto.Email,
+                PasswordHash = _passwords.Hash(dto.Password),
+                Employee_ID = dto.Employee_ID,
+                Role_ID = dto.Role_ID,
+                Department_ID = dto.Department_ID,
+                IsActive = true
+            };
+            _Localdb.Users.Add(user);
             _Localdb.SaveChanges();
-
-            return Ok(users);
+            return Ok(new { user.User_ID });
         }
 
         [HttpPost("UpdateLocalUsers")]
-        public ActionResult<Users> UpdateLocalUsers(Int32 Id, [FromBody] Users users)
+        public ActionResult UpdateLocalUsers(int id, [FromBody] UpdateUserDto dto)
         {
-            if (users == null)
-            {
-                return BadRequest(users);
-            }
+            var user = _Localdb.Users.FirstOrDefault(u => u.User_ID == id);
+            if (user == null) return NotFound();
 
-            var _users = _Localdb.Users.FirstOrDefault(x => x.User_ID == Id);
-            if (users == null)
-            {
-                return NotFound();
-            }
-
-            _users.User_ID = users.User_ID;
-            _users.Employee_ID = users.Employee_ID;
-            _users.Username = users.Username;
-            _users.Employee_ID = users.Employee_ID;
-            _users.Email = users.Email;
-            _users.Role_ID = users.Role_ID;
-            _users.Department_ID = users.Department_ID;
-            _users.IsActive = users.IsActive;
+            user.Username = dto.Username.Trim();
+            user.Email = dto.Email;
+            user.Role_ID = dto.Role_ID;
+            user.Department_ID = dto.Department_ID;
+            user.IsActive = dto.IsActive;          // PasswordHash is never touched here
             _Localdb.SaveChanges();
-
-
-            return Ok(users);
+            return Ok();
         }
 
         [HttpPut("DeleteLocalUsers")]
@@ -88,33 +95,35 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("ResetLocalUserPassword")]
-        public IActionResult ResetLocalUserPassword([FromBody] JsonElement data)
+        public ActionResult ResetLocalUserPassword([FromBody] ResetPasswordDto dto)
         {
-            int targetUserId = data.GetProperty("targetUserId").GetInt32();
-            string adminUsername = data.GetProperty("adminUsername").GetString() ?? "";
-            string adminPassword = data.GetProperty("adminPassword").GetString() ?? "";
-            var admin = _Localdb.Users.FirstOrDefault( x => x.Username == adminUsername);
-            if (admin == null)
-                return Unauthorized("Invalid admin credentials.");
-            // TODO: Verify adminPassword using your existing
-            // login password verification method.
-            // Also verify the user's administrator role.
-            // Find the selected account
-            var user = _Localdb.Users.FirstOrDefault( x => x.User_ID == targetUserId);
+            var adminId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var admin = _Localdb.Users.AsNoTracking().FirstOrDefault(u => u.User_ID == adminId);
+            if (admin == null || !_passwords.Verify(admin.PasswordHash, dto.AdminPassword))
+                return StatusCode(403, new { message = "Your password was not accepted." });
 
-            if (user == null)
-                return NotFound("User not found.");
+            var target = _Localdb.Users.FirstOrDefault(u => u.User_ID == dto.TargetUserId);
+            if (target == null) return NotFound();
 
-            // TODO: Hash your configured default password
-            // using the same method as your login system.
-            // Assign the resulting hash to the password field.
-
+            var temp = GenerateTemporaryPassword();
+            target.PasswordHash = _passwords.Hash(temp);
             _Localdb.SaveChanges();
+            return Ok(new { message = "Password reset.", temporaryPassword = temp });
+        }
+        private static string GenerateTemporaryPassword()
+        {
+            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+            return new string(Enumerable.Range(0, 12)
+                .Select(_ => chars[System.Security.Cryptography.RandomNumberGenerator.GetInt32(chars.Length)]).ToArray());
+        }
 
-            return Ok(new
-            {
-                message = "Password reset successfully."
-            });
+        [HttpGet("Me")]
+        public ActionResult Me()
+        {
+            var id = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var u = _Localdb.Users.AsNoTracking().Where(x => x.User_ID == id)
+                .Select(x => new { x.User_ID, x.Username, x.Email, x.Employee_ID }).FirstOrDefault();
+            return u == null ? NotFound() : Ok(u);
         }
 
         [HttpGet("GetLocalRoles")]

@@ -45,9 +45,28 @@ namespace APINIMIRHEMAA.Services
 
             return _protector.Unprotect(value);
         }
-        internal void Encrypt(ClientsProject clientProjectDetails)
+        public static bool IsProtected(byte[]? v) => v != null && v.Length > 4 && v[0] == 0x09 && v[1] == 0xF0 && v[2] == 0xC9 && v[3] == 0xF0;
+
+        public byte[] TryDecrypt(byte[]? value)
         {
-            throw new NotImplementedException();
+            if (value == null || value.Length == 0) return Array.Empty<byte>();
+            if (!IsProtected(value)) return value;   // legacy plaintext row, return as-is
+            try { return _protector.Unprotect(value); }
+            catch (System.Security.Cryptography.CryptographicException ex)
+            {
+                Console.Error.WriteLine("Decrypt failed: " + ex.Message);
+                return Array.Empty<byte>();
+            }
+        }
+        public string TryDecrypt(string? value)
+        {
+            if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
+            try { return _protector.Unprotect(value); }
+            catch (System.Security.Cryptography.CryptographicException ex)
+            {
+                Console.Error.WriteLine("Decrypt failed: " + ex.Message);
+                return string.Empty;
+            }
         }
     }
 }
