@@ -85,16 +85,21 @@ builder.Services.AddCors(options =>
     });
 });
 
+var appServiceHome = Environment.GetEnvironmentVariable("HOME");
+var dataProtectionKeyPath = !string.IsNullOrWhiteSpace(
+    Environment.GetEnvironmentVariable("WEBSITE_INSTANCE_ID"))
+    ? Path.Combine(
+        appServiceHome ?? throw new InvalidOperationException(
+            "The Azure App Service HOME directory is not configured."),
+        "ASP.NET",
+        "DataProtection-Keys")
+    : Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ASP.NET",
+        "DataProtection-Keys");
+Directory.CreateDirectory(dataProtectionKeyPath);
 builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(
-        new DirectoryInfo(
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ASP.NET",
-                "DataProtection-Keys"
-            )
-        )
-    );
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeyPath));
 builder.Services.AddScoped<EncryptionService>();
 
 var app = builder.Build();
