@@ -11,7 +11,7 @@
             if (role == "Super Admin" || role == "Admin")
                 return AllModules.ToList();
 
-            var modules = new List<string>();
+            var modules = new List<string> { "analytics" };
 
             // Everyone else gets their own department's module
             switch (department)

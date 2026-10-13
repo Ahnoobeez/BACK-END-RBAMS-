@@ -1,8 +1,14 @@
 ﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.DTO;
 using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Data;
+using System.Security.Claims;
+using System.Text;
 
 namespace APINIMIRHEMAA.Controllers
 {
@@ -19,101 +25,93 @@ namespace APINIMIRHEMAA.Controllers
             _CloudDb = Cloudcontext;
         }
 
+        private static string? CalculatePurchaseAmount(Purchased_Material purchase, out int amount)
+        {
+            amount = 0;
+            if (purchase.Quantity <= 0)
+                return "Quantity must be greater than zero.";
+            if (purchase.Unit_price < 0)
+                return "Unit price cannot be negative.";
+
+            var total = (long)purchase.Quantity * purchase.Unit_price;
+            if (total > int.MaxValue)
+                return "The purchase amount exceeds the supported limit.";
+
+            amount = (int)total;
+            return null;
+        }
+
         // --------------------------- INVENTORY HELPERS (LOCAL) ---------------------------
 
-        private static bool IsApproved(string? status) =>
-            string.Equals(status?.Trim(), "Approved", StringComparison.OrdinalIgnoreCase);
-
-        // Pending = not approved yet. Adjust if you use other status words (Rejected, Cancelled, etc.)
         private static bool IsPending(string? status) =>
             string.IsNullOrWhiteSpace(status) ||
             string.Equals(status.Trim(), "Pending", StringComparison.OrdinalIgnoreCase);
 
-        private static bool IsInventory(string? value) =>
-            string.Equals(value?.Trim(), "Inventory", StringComparison.OrdinalIgnoreCase);
-
-        // True when the slip takes stock OUT of inventory (From = Inventory)
-        private static bool IsDeducting(MaterialRequesition_Slip slip) =>
-            IsInventory(slip.FromWho) && !IsInventory(slip.ToWho);
-
-        // Positive = adds to inventory, negative = deducts, 0 = no effect
-        private static int GetInventoryEffect(MaterialRequesition_Slip slip)
+        private int GetPendingDemand(int materialId, int? excludingRequisitionId = null)
         {
-            if (!IsApproved(slip.Status)) return 0;
+            var query = _Localdb.MaterialRequisition_Slip
+                .AsNoTracking()
+                .Where(s => s.Material_ID == materialId &&
+                    (s.Status == null || s.Status.Trim() == "" ||
+                     s.Status.Trim().ToUpper() == "PENDING"));
 
-            int qty = slip.Quantity ?? 0;
-
-            bool fromInventory = IsInventory(slip.FromWho);
-            bool toInventory = IsInventory(slip.ToWho);
-
-            if (fromInventory && !toInventory) return -qty;
-            if (toInventory && !fromInventory) return qty;
-            return 0;
-        }
-
-        // Applies a signed change to inventory. Deductions take from Balance first,
-        // then from Buffer. Returns an error message, or null if OK.
-        private string? ApplyInventoryChange(int materialId, int delta)
-        {
-            if (delta == 0) return null;
-
-            var inv = _Localdb.Inventory.FirstOrDefault(x => x.Material_ID == materialId);
-            if (inv == null)
-                return $"No inventory record found for Material_ID {materialId}.";
-
-            if (delta > 0)
+            if (excludingRequisitionId.HasValue)
             {
-                inv.Balance += delta; // stock coming in
-                return null;
+                query = query.Where(s => s.MR_ID != excludingRequisitionId.Value);
             }
 
-            int needed = -delta;
-            if (inv.Balance + inv.Buffer < needed)
-                return $"Insufficient stock. Balance: {inv.Balance}, buffer: {inv.Buffer}, needed: {needed}.";
-
-            int fromBalance = Math.Min(inv.Balance, needed);
-            inv.Balance -= fromBalance;
-            inv.Buffer -= needed - fromBalance; // the rest comes out of the buffer
-            return null;
+            return query.Sum(s => s.Quantity ?? 0);
         }
 
-        // Total quantity already requested (pending) from inventory for this material
-        private int GetPendingDemand(int materialId)
+        private string? ReverseApprovedRequisitionEffect(MaterialRequesition_Slip slip)
         {
-            return _Localdb.MaterialRequisition_Slip
-                .Where(x => x.Material_ID == materialId)
-                .ToList() // filter in memory because EF can't translate the helper methods
-                .Where(x => IsPending(x.Status) && IsDeducting(x))
-                .Sum(x => x.Quantity ?? 0);
-        }
-
-        // Checks a NEW request against Balance, pending requests, and Buffer.
-        // Returns an error message, or null if the request can go through.
-        private string? CheckRequestCapacity(MaterialRequesition_Slip slip)
-        {
-            if (!IsDeducting(slip)) return null; // only checks requests that take stock out
-
-            int qty = slip.Quantity ?? 0;
-
-            var inv = _Localdb.Inventory.FirstOrDefault(x => x.Material_ID == slip.Material_ID);
-            if (inv == null)
+            var inventory = _Localdb.Inventory.FirstOrDefault(x => x.Material_ID == slip.Material_ID);
+            if (inventory == null)
                 return $"No inventory record found for Material_ID {slip.Material_ID}.";
 
-            int pending = GetPendingDemand(slip.Material_ID);
-            int freeBalance = Math.Max(inv.Balance - pending, 0);
-            int shortfall = Math.Max(qty - freeBalance, 0); // the part that must come from the buffer
+            InventoryRules.Recalculate(inventory);
+            var quantity = slip.Quantity ?? 0;
+            if (quantity <= 0)
+                return $"Requisition {slip.MR_ID} has an invalid quantity.";
 
-            if (shortfall > inv.Buffer)
+            if (InventoryRules.IsWarehouse(slip.FromWho))
             {
-                return $"Request exceeds available stock. Balance: {inv.Balance}, " +
-                       $"already requested (pending): {pending}, buffer: {inv.Buffer}, " +
-                       $"requested now: {qty}.";
+                var remaining = quantity;
+                var fromBuffer = Math.Min(remaining, Math.Max(inventory.Request_Buffer ?? 0, 0));
+                remaining -= fromBuffer;
+                var fromPurchased = Math.Min(remaining, Math.Max(inventory.Request_Purchased ?? 0, 0));
+                remaining -= fromPurchased;
+                var fromBalance = Math.Min(remaining, Math.Max(inventory.Request_Balance ?? 0, 0));
+                remaining -= fromBalance;
+                if (remaining > 0)
+                    return $"Requisition {slip.MR_ID} cannot be removed because its approved quantity is no longer recorded.";
+
+                inventory.Request_Buffer = (inventory.Request_Buffer ?? 0) - fromBuffer;
+                inventory.Request_Purchased = (inventory.Request_Purchased ?? 0) - fromPurchased;
+                inventory.Request_Balance = (inventory.Request_Balance ?? 0) - fromBalance;
+
+                var restoredToBuffer = Math.Min(
+                    fromBuffer,
+                    Math.Max(InventoryRules.BufferTarget - (inventory.Buffer ?? 0), 0));
+                inventory.Buffer = (inventory.Buffer ?? 0) + restoredToBuffer;
+                inventory.Purchased = (inventory.Purchased ?? 0) + fromBuffer - restoredToBuffer;
+            }
+            else if (InventoryRules.IsWarehouse(slip.ToWho))
+            {
+                var returned = (inventory.Returned ?? 0) - quantity;
+                if (returned < 0)
+                    return $"Requisition {slip.MR_ID} cannot be removed because its returned quantity is no longer recorded.";
+                inventory.Returned = returned;
+            }
+            else
+            {
+                return $"Requisition {slip.MR_ID} does not involve the Warehouse.";
             }
 
+            InventoryRules.Recalculate(inventory);
             return null;
         }
 
-        // --------------------------- INVENTORY HELPERS (LOCAL) ---------------------------
 
         // --------------------------- MATERIALS ---------------------------
         [HttpGet("GetLocalMaterials")]
@@ -237,47 +235,91 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalInventory")]
         public List<Inventory> GetAllLocalInventory()
         {
-            return _Localdb.Inventory.ToList();
+            var inventoryRecords = _Localdb.Inventory.AsNoTracking().ToList();
+            var pendingRequests = _Localdb.MaterialRequisition_Slip
+                .AsNoTracking()
+                .Where(s => s.Status == null || s.Status.Trim() == "" ||
+                    s.Status.Trim().ToUpper() == "PENDING")
+                .GroupBy(s => s.Material_ID)
+                .Select(group => new
+                {
+                    MaterialId = group.Key,
+                    Quantity = group.Sum(s => s.Quantity ?? 0)
+                })
+                .ToList()
+                .ToDictionary(group => group.MaterialId, group => group.Quantity);
+
+            foreach (var inventory in inventoryRecords)
+            {
+                inventory.Request = pendingRequests.TryGetValue(inventory.Material_ID, out var quantity)
+                    ? quantity
+                    : 0;
+                InventoryRules.Recalculate(inventory);
+            }
+
+            return inventoryRecords;
         }
 
         [HttpPost("AddLocalInventory")]
-        public ActionResult<Inventory> AddLocalInventory([FromBody] Inventory inventory)
+        public async Task<ActionResult<Inventory>> AddLocalInventory([FromBody] Inventory inventory)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
+
+            inventory.Beginning_Balance = 0;
+            inventory.Buffer = 0;
+            inventory.Purchased = 0;
+            inventory.Request = 0;
+            inventory.Returned = 0;
+            inventory.Balance = 0;
+            inventory.Request_Balance = inventory.Request_Purchased = inventory.Request_Buffer = 0;
+            InventoryRules.Recalculate(inventory);
+
             _Localdb.Inventory.Add(inventory);
-            _Localdb.SaveChanges();
+            await _Localdb.SaveChangesAsync();
+
             return Ok(inventory);
         }
 
         [HttpPost("UpdateLocalInventory")]
-        public ActionResult<Inventory> UpdateLocalInventory([FromBody] Inventory inventory)
+        public async Task<ActionResult<Inventory>> UpdateLocalInventory([FromBody] Inventory incoming)
         {
-            if (inventory == null)
+            if (incoming == null)
             {
-                return BadRequest(inventory);
+                return BadRequest("Inventory data is required.");
             }
 
-            var _inventory = _Localdb.Inventory.FirstOrDefault(x => x.Material_ID == inventory.Material_ID);
-            if (_inventory == null)
+            var existing = await _Localdb.Inventory
+                .FirstOrDefaultAsync(x => x.Material_ID == incoming.Material_ID);
+            if (existing == null)
             {
                 return NotFound();
             }
+            if ((incoming.Buffer ?? 0) < 0 || (incoming.Returned ?? 0) < 0)
+            {
+                return BadRequest("Buffer and returned stock cannot be negative.");
+            }
+            existing.Request = GetPendingDemand(existing.Material_ID);
+            InventoryRules.Recalculate(existing);
 
-            _inventory.Inventory_ID = inventory.Inventory_ID;
-            _inventory.Beginning_Balance = inventory.Beginning_Balance;
-            _inventory.Buffer = inventory.Buffer;
-            _inventory.Purchased = inventory.Purchased;
-            _inventory.Request = inventory.Request;
-            _inventory.Returned = inventory.Returned;
-            _inventory.Balance = inventory.Balance;
-            _inventory.Status = inventory.Status;
-            _inventory.Material_ID = inventory.Material_ID;
-            _Localdb.SaveChanges();
+            // Validate the incoming values before applying them
+            if (incoming.Buffer < existing.Request_Buffer ||
+                incoming.Beginning_Balance < existing.Request_Balance)
+            {
+                return BadRequest("Beginning balance and buffer cannot be lower than what has already been issued.");
+            }
 
-            return Ok(_inventory);
+            existing.Beginning_Balance = incoming.Beginning_Balance;
+            existing.Buffer = incoming.Buffer;
+            existing.Returned = incoming.Returned;
+            // never copy Purchased, Request*, Balance
+
+            InventoryRules.Recalculate(existing);
+            await _Localdb.SaveChangesAsync();
+
+            return Ok(existing);
         }
 
         [HttpPut("DeleteLocalInventory")]
@@ -298,7 +340,12 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetCloudInventory")]
         public List<Inventory> GetAllCloudInventory()
         {
-            return _CloudDb.Inventory.ToList();
+            var inventoryRecords = _CloudDb.Inventory.ToList();
+            foreach (var inventory in inventoryRecords)
+            {
+                InventoryRules.Recalculate(inventory);
+            }
+            return inventoryRecords;
         }
 
         [HttpPost("AddCloudInventory")]
@@ -308,6 +355,14 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            inventory.Beginning_Balance = 0;
+            inventory.Buffer = 0;
+            inventory.Purchased = 0;
+            inventory.Request = 0;
+            inventory.Returned = 0;
+            inventory.Balance = 0;
+            inventory.Request_Balance = inventory.Request_Purchased = inventory.Request_Buffer = 0;
+            InventoryRules.Recalculate(inventory);
             _CloudDb.Inventory.Add(inventory);
             _CloudDb.SaveChanges();
             return Ok(inventory);
@@ -334,8 +389,8 @@ namespace APINIMIRHEMAA.Controllers
             _inventory.Request = inventory.Request;
             _inventory.Returned = inventory.Returned;
             _inventory.Balance = inventory.Balance;
-            _inventory.Status = inventory.Status;
             _inventory.Material_ID = inventory.Material_ID;
+            InventoryRules.Recalculate(_inventory);
             _CloudDb.SaveChanges();
 
             return Ok(_inventory);
@@ -367,24 +422,183 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("AddLocalPurchaseMaterial")]
-        public ActionResult<Purchased_Material> AddLocalPurchaseMaterial([FromBody] Purchased_Material purchased_material)
+        public ActionResult<Purchased_Material> AddLocalPurchaseMaterial([FromBody] Purchased_Material p)
         {
-            if (!ModelState.IsValid)
+            if (p == null) return BadRequest("Purchase details are required.");
+            var amountError = CalculatePurchaseAmount(p, out var amount);
+            if (amountError != null) return BadRequest(amountError);
+
+            using var tx = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
+
+            var inv = _Localdb.Inventory.FirstOrDefault(i => i.Material_ID == p.Material_ID);
+            if (inv == null) return BadRequest("This material has no inventory record.");
+
+            InventoryRules.Recalculate(inv);
+            p.Purchased_ID = 0;
+            p.Amount = amount;
+            _Localdb.Purchased_Material.Add(p);
+
+            var bufferAdded = InventoryRules.BufferAllocation(inv.Buffer ?? 0, p.Quantity);
+            inv.Buffer = (inv.Buffer ?? 0) + bufferAdded;
+            inv.Purchased = (inv.Purchased ?? 0) + p.Quantity - bufferAdded;
+            InventoryRules.Recalculate(inv);
+
+            _Localdb.SaveChanges();
+            tx.Commit();
+            return Ok(p);
+        }
+
+        [HttpPost("PreviewRequisition")]
+        public ActionResult PreviewRequisition([FromBody] RequisitionPreviewDto dto)
+        {
+            var dirError = InventoryRules.CheckDirection(dto.FromWho, dto.ToWho);
+            if (dirError != null) return BadRequest(dirError);
+
+            if (InventoryRules.IsWarehouse(dto.ToWho))
+                return Ok(new { usesBuffer = false, fromBuffer = 0, fromPurchased = 0, fromBalance = 0 });
+
+            var inv = _Localdb.Inventory.AsNoTracking().FirstOrDefault(i => i.Material_ID == dto.Material_ID);
+            if (inv == null) return BadRequest("This material has no inventory record.");
+
+            var plan = InventoryRules.PlanIssue(inv, dto.Quantity);
+            if (plan.Error != null) return BadRequest(plan.Error);
+
+            return Ok(new
             {
-                return BadRequest(ModelState);
+                available = InventoryRules.Available(inv)
+            });
+        }
+
+        [HttpPost("AddLocalMaterialRequisitionSlipBatch")]
+        public ActionResult AddMaterialRequisitionBatch([FromBody] List<MaterialRequesition_Slip> slips)
+        {
+            if (slips == null || slips.Count == 0) return BadRequest("No materials.");
+
+            var submitter = User.FindFirstValue(ClaimTypes.Name);
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            var initializedRequests = new HashSet<int>();
+
+            for (int i = 0; i < slips.Count; i++)
+            {
+                var s = slips[i];
+                var label = $"Row {i + 1} ({s.Material_Name})";
+
+                if (string.IsNullOrWhiteSpace(s.Control_Number)) return BadRequest($"{label}: control number is required.");
+                if ((s.Quantity ?? 0) <= 0) return BadRequest($"{label}: quantity must be greater than zero.");
+                var quantity = s.Quantity.GetValueOrDefault();
+                if ((s.Unit_Cost ?? 0) < 0) return BadRequest($"{label}: unit cost cannot be negative.");
+
+                var dirError = InventoryRules.CheckDirection(s.FromWho, s.ToWho);
+                if (dirError != null) return BadRequest($"{label}: {dirError}");
+
+                var inv = _Localdb.Inventory.FirstOrDefault(x => x.Material_ID == s.Material_ID);
+                if (inv == null) return BadRequest($"{label}: this material has no inventory record.");
+
+                if (initializedRequests.Add(s.Material_ID))
+                {
+                    inv.Request = GetPendingDemand(s.Material_ID);
+                }
+
+                if (InventoryRules.IsWarehouse(s.FromWho))
+                {
+                    var plan = InventoryRules.PlanIssue(inv, quantity);
+                    if (plan.Error != null) return BadRequest($"{label}: {plan.Error}");
+                }
+
+                inv.Request = (inv.Request ?? 0) + quantity;
+                s.MR_ID = 0;
+                s.Total_Cost = s.Quantity * s.Unit_Cost;       // computed here
+                s.Status = "Pending";
+                s.Submmited_By = submitter;                    // from the token
+                s.Date = today;                                // server date
+                _Localdb.MaterialRequisition_Slip.Add(s);
             }
 
-            var inv = _Localdb.Inventory.FirstOrDefault(x => x.Material_ID == purchased_material.Material_ID);
-            if (inv == null)
+            _Localdb.SaveChanges();                            // all rows or none
+            return Ok(new { saved = slips.Count });
+        }
+
+        [HttpPost("ApproveRequisitions")]
+        public ActionResult ApproveRequisitions([FromBody] List<int> ids)
+        {
+            if (ids == null || ids.Count == 0) return BadRequest("No requisitions selected.");
+            ids = ids.Distinct().ToList();
+
+            using var tx = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
+
+            var slips = _Localdb.MaterialRequisition_Slip.Where(s => ids.Contains(s.MR_ID)).ToList();
+            if (slips.Count != ids.Count) return NotFound("A selected requisition no longer exists.");
+            var initializedRequests = new HashSet<int>();
+
+            foreach (var slip in slips)
             {
-                return BadRequest($"No inventory record found for Material_ID {purchased_material.Material_ID}.");
+                if (!IsPending(slip.Status))
+                    return Conflict($"Requisition {slip.MR_ID} is already {slip.Status}.");
+
+                var directionError = InventoryRules.CheckDirection(slip.FromWho, slip.ToWho);
+                if (directionError != null)
+                    return Conflict($"Requisition {slip.MR_ID}: {directionError}");
+
+                var inv = _Localdb.Inventory.FirstOrDefault(i => i.Material_ID == slip.Material_ID);
+                if (inv == null) return BadRequest($"\"{slip.Material_Name}\" has no inventory record.");
+
+                var qty = slip.Quantity ?? 0;
+                if (qty <= 0) return BadRequest($"Requisition {slip.MR_ID} has an invalid quantity.");
+
+                if (initializedRequests.Add(slip.Material_ID))
+                {
+                    inv.Request = GetPendingDemand(slip.Material_ID);
+                }
+                if ((inv.Request ?? 0) < qty)
+                    return Conflict($"Requisition {slip.MR_ID} is not included in the pending request total.");
+                inv.Request -= qty;
+
+                if (InventoryRules.IsWarehouse(slip.FromWho))           // material leaves the warehouse
+                {
+                    var plan = InventoryRules.PlanIssue(inv, qty);
+                    if (plan.Error != null) return Conflict($"\"{slip.Material_Name}\": {plan.Error}");
+
+                    InventoryRules.Apply(inv, plan);
+                }
+                else if (InventoryRules.IsWarehouse(slip.ToWho))        // material comes into the warehouse
+                {
+                    inv.Returned = (inv.Returned ?? 0) + qty;
+                    InventoryRules.Recalculate(inv);
+                }
+                else return BadRequest($"Requisition {slip.MR_ID} does not involve the Warehouse.");
+
+                slip.Status = "Approved";
             }
 
-            inv.Balance += purchased_material.Quantity;
+            _Localdb.SaveChanges();
+            tx.Commit();
+            return Ok(new { approved = slips.Count });
+        }
 
-            _Localdb.Purchased_Material.Add(purchased_material);
-            _Localdb.SaveChanges(); 
-            return Ok(purchased_material);
+        [HttpPost("RejectRequisitions")]
+        public ActionResult RejectRequisitions([FromBody] List<int> ids)
+        {
+            if (ids == null || ids.Count == 0) return BadRequest("No requisitions selected.");
+            var slips = _Localdb.MaterialRequisition_Slip
+                .Where(s => ids.Contains(s.MR_ID))
+                .ToList()
+                .Where(s => IsPending(s.Status))
+                .ToList();
+            foreach (var s in slips) s.Status = "Rejected";
+
+            foreach (var group in slips.GroupBy(s => s.Material_ID))
+            {
+                var inventory = _Localdb.Inventory.FirstOrDefault(i => i.Material_ID == group.Key);
+                if (inventory != null)
+                {
+                    inventory.Request = Math.Max(
+                        GetPendingDemand(group.Key) - group.Sum(s => s.Quantity ?? 0),
+                        0);
+                }
+            }
+
+            _Localdb.SaveChanges();
+            return Ok(new { rejected = slips.Count });
         }
 
         [HttpPost("UpdateLocalPurchaseMaterial")]
@@ -394,6 +608,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(purchased_material);
             }
+            var amountError = CalculatePurchaseAmount(purchased_material, out var amount);
+            if (amountError != null) return BadRequest(amountError);
 
             var _purchased_material = _Localdb.Purchased_Material.FirstOrDefault(x => x.Purchased_ID == purchased_material.Purchased_ID);
             if (_purchased_material == null)
@@ -409,7 +625,7 @@ namespace APINIMIRHEMAA.Controllers
             _purchased_material.Remarks = purchased_material.Remarks;
             _purchased_material.Quantity = purchased_material.Quantity;
             _purchased_material.Unit_price = purchased_material.Unit_price;
-            _purchased_material.Amount = purchased_material.Amount;
+            _purchased_material.Amount = amount;
             _purchased_material.Material_ID = purchased_material.Material_ID;
             _Localdb.SaveChanges();
 
@@ -444,6 +660,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            if (purchased_material == null) return BadRequest("Purchase details are required.");
+            var amountError = CalculatePurchaseAmount(purchased_material, out var amount);
+            if (amountError != null) return BadRequest(amountError);
+
+            purchased_material.Amount = amount;
             _Localdb.Purchased_Material.Add(purchased_material);
             _Localdb.SaveChanges();
             return Ok(purchased_material);
@@ -456,6 +677,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(purchased_material);
             }
+            var amountError = CalculatePurchaseAmount(purchased_material, out var amount);
+            if (amountError != null) return BadRequest(amountError);
 
             var _purchased_material = _Localdb.Purchased_Material.FirstOrDefault(x => x.Purchased_ID == purchased_material.Purchased_ID);
             if (_purchased_material == null)
@@ -471,7 +694,7 @@ namespace APINIMIRHEMAA.Controllers
             _purchased_material.Remarks = purchased_material.Remarks;
             _purchased_material.Quantity = purchased_material.Quantity;
             _purchased_material.Unit_price = purchased_material.Unit_price;
-            _purchased_material.Amount = purchased_material.Amount;
+            _purchased_material.Amount = amount;
             _purchased_material.Material_ID = purchased_material.Material_ID;
             _Localdb.SaveChanges();
 
@@ -526,18 +749,30 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(ModelState);
             }
 
-            // 1. Would this request, together with the pending ones, exceed stock + buffer?
-            var error = CheckRequestCapacity(materialRequesitionSlip);
-            if (error != null)
-                return BadRequest(error);
+            if ((materialRequesitionSlip.Quantity ?? 0) <= 0)
+                return BadRequest("Quantity must be greater than zero.");
+            var quantity = materialRequesitionSlip.Quantity.GetValueOrDefault();
 
-            // 2. If it's created already approved, apply it now
-            error = ApplyInventoryChange(
-                materialRequesitionSlip.Material_ID,
-                GetInventoryEffect(materialRequesitionSlip));
-            if (error != null)
-                return BadRequest(error);
+            var directionError = InventoryRules.CheckDirection(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (directionError != null) return BadRequest(directionError);
 
+            var inventory = _Localdb.Inventory
+                .FirstOrDefault(x => x.Material_ID == materialRequesitionSlip.Material_ID);
+            if (inventory == null) return BadRequest("This material has no inventory record.");
+
+            if (InventoryRules.IsWarehouse(materialRequesitionSlip.FromWho))
+            {
+                var plan = InventoryRules.PlanIssue(inventory, quantity);
+                if (plan.Error != null) return BadRequest(plan.Error);
+            }
+
+            inventory.Request = GetPendingDemand(inventory.Material_ID)
+                + quantity;
+            materialRequesitionSlip.Status = "Pending";
+            materialRequesitionSlip.Total_Cost =
+                materialRequesitionSlip.Quantity * materialRequesitionSlip.Unit_Cost;
             _Localdb.Add(materialRequesitionSlip);
             _Localdb.SaveChanges();
             return Ok(materialRequesitionSlip);
@@ -556,17 +791,50 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
-            // Capture OLD effect before values are overwritten
-            int oldEffect = GetInventoryEffect(updateMaterialRequesitionSlip);
-            int oldMaterialId = updateMaterialRequesitionSlip.Material_ID;
+            if (!IsPending(updateMaterialRequesitionSlip.Status))
+                return Conflict("Only pending requisitions can be edited.");
 
-            int newEffect = GetInventoryEffect(materialRequesitionSlip);
+            var directionError = InventoryRules.CheckDirection(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (directionError != null) return BadRequest(directionError);
 
-            // Undo the old effect, then apply the new one
-            var error = ApplyInventoryChange(oldMaterialId, -oldEffect)
-                     ?? ApplyInventoryChange(materialRequesitionSlip.Material_ID, newEffect);
-            if (error != null)
-                return BadRequest(error); // nothing saved, so no changes are kept
+            if ((materialRequesitionSlip.Quantity ?? 0) <= 0)
+                return BadRequest("Quantity must be greater than zero.");
+            var quantity = materialRequesitionSlip.Quantity.GetValueOrDefault();
+
+            var updatedInventory = _Localdb.Inventory
+                .FirstOrDefault(x => x.Material_ID == materialRequesitionSlip.Material_ID);
+            if (updatedInventory == null) return BadRequest("This material has no inventory record.");
+
+            if (InventoryRules.IsWarehouse(materialRequesitionSlip.FromWho))
+            {
+                var plan = InventoryRules.PlanIssue(updatedInventory, quantity);
+                if (plan.Error != null) return BadRequest(plan.Error);
+            }
+
+            var currentMaterialId = updateMaterialRequesitionSlip.Material_ID;
+            var currentQuantity = updateMaterialRequesitionSlip.Quantity ?? 0;
+            if (currentMaterialId == materialRequesitionSlip.Material_ID)
+            {
+                updatedInventory.Request = Math.Max(
+                    GetPendingDemand(currentMaterialId) - currentQuantity
+                        + quantity,
+                    0);
+            }
+            else
+            {
+                var currentInventory = _Localdb.Inventory
+                    .FirstOrDefault(x => x.Material_ID == currentMaterialId);
+                if (currentInventory == null)
+                    return BadRequest("The current material has no inventory record.");
+
+                currentInventory.Request = Math.Max(
+                    GetPendingDemand(currentMaterialId) - currentQuantity,
+                    0);
+                updatedInventory.Request = GetPendingDemand(materialRequesitionSlip.Material_ID)
+                    + quantity;
+            }
 
             updateMaterialRequesitionSlip.Control_Number = materialRequesitionSlip.Control_Number;
             updateMaterialRequesitionSlip.Material_ID = materialRequesitionSlip.Material_ID;
@@ -583,7 +851,7 @@ namespace APINIMIRHEMAA.Controllers
             updateMaterialRequesitionSlip.Approved_By = materialRequesitionSlip.Approved_By;
             updateMaterialRequesitionSlip.Submmited_By = materialRequesitionSlip.Submmited_By;
             updateMaterialRequesitionSlip.Received_By = materialRequesitionSlip.Received_By;
-            updateMaterialRequesitionSlip.Status = materialRequesitionSlip.Status;
+            updateMaterialRequesitionSlip.Status = "Pending";
 
             _Localdb.SaveChanges();
             return Ok(updateMaterialRequesitionSlip);
@@ -598,12 +866,23 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
-            // Deleting a slip undoes whatever it did to inventory
-            var error = ApplyInventoryChange(
-                materialRequesitionSlip.Material_ID,
-                -GetInventoryEffect(materialRequesitionSlip));
-            if (error != null)
-                return BadRequest(error);
+            if (string.Equals(materialRequesitionSlip.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            {
+                var error = ReverseApprovedRequisitionEffect(materialRequesitionSlip);
+                if (error != null) return Conflict(error);
+            }
+            else if (IsPending(materialRequesitionSlip.Status))
+            {
+                var inventory = _Localdb.Inventory
+                    .FirstOrDefault(x => x.Material_ID == materialRequesitionSlip.Material_ID);
+                if (inventory != null)
+                {
+                    inventory.Request = Math.Max(
+                        GetPendingDemand(materialRequesitionSlip.Material_ID)
+                            - (materialRequesitionSlip.Quantity ?? 0),
+                        0);
+                }
+            }
 
             _Localdb.Remove(materialRequesitionSlip);
             _Localdb.SaveChanges();

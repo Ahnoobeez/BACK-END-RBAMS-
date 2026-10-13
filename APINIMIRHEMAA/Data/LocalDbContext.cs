@@ -24,6 +24,8 @@ namespace APINIMIRHEMAA.Data
         public DbSet<DeliveryReceipt> DeliveryReceipt { get; set; }
         public DbSet<Graphics> Graphics { get; set; }
         public DbSet<Installation_Schedule> Installation_Schedule { get; set; }
+        public DbSet<InstallationScheduleEmployee> Installation_Schedule_Employee { get; set; }
+        public DbSet<InstallationReport> InstallationReport { get; set; }
         public DbSet<IssuedBy> IssuedBy { get; set; }
         public DbSet<MaterialRequesition_Slip> MaterialRequisition_Slip { get; set; }
         public DbSet<Materials> Materials { get; set; }

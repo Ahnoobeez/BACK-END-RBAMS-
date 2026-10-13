@@ -1,10 +1,13 @@
 ﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.DTO.ClientsProject;
+using APINIMIRHEMAA.DTO.InstallationReport;
 using APINIMIRHEMAA.Models;
 using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 
 namespace APINIMIRHEMAA.Controllers
@@ -24,6 +27,79 @@ namespace APINIMIRHEMAA.Controllers
             _encryptionService = encryptionService;
         }
 
+        [HttpPost("AddLocalClientAndProject")]
+        public async Task<ActionResult> AddLocalClientAndProject([FromBody] CreateClientAndProjectRequest request)
+        {
+            if (request?.Client == null || request.Project == null)
+            {
+                return BadRequest("Both client information and project request details are required.");
+            }
+
+            var clientValidationResults = new List<ValidationResult>();
+            Validator.TryValidateObject(
+                request.Client,
+                new ValidationContext(request.Client),
+                clientValidationResults,
+                validateAllProperties: true);
+            foreach (var result in clientValidationResults)
+            {
+                ModelState.AddModelError(
+                    $"Client.{result.MemberNames.FirstOrDefault() ?? string.Empty}",
+                    result.ErrorMessage ?? "Client information is invalid.");
+            }
+
+            var projectValidationResults = new List<ValidationResult>();
+            Validator.TryValidateObject(
+                request.Project,
+                new ValidationContext(request.Project),
+                projectValidationResults,
+                validateAllProperties: true);
+            foreach (var result in projectValidationResults)
+            {
+                ModelState.AddModelError(
+                    $"Project.{result.MemberNames.FirstOrDefault() ?? string.Empty}",
+                    result.ErrorMessage ?? "Project request details are invalid.");
+            }
+
+            if (!ModelState.IsValid)
+            {
+                return ValidationProblem(ModelState);
+            }
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync();
+
+            var clientRequest = request.Client;
+            var client = new ClientEntity
+            {
+                Client_Name = clientRequest.Client_Name!,
+                Client_Telephone = clientRequest.Client_Telephone!,
+                Contact_Person = clientRequest.Contact_Person,
+                Client_EmailAddress = clientRequest.Client_EmailAddress,
+                TermsAndCondition = clientRequest.TermsAndCondition,
+                Company_Address = clientRequest.Company_Address,
+                TIN = clientRequest.TIN,
+                Payment_Terms = clientRequest.Payment_Terms
+            };
+            _Localdb.Clients.Add(client);
+            await _Localdb.SaveChangesAsync();
+
+            var projectRequest = request.Project;
+            var project = new ClientsProject
+            {
+                Client_ID = client.Client_ID,
+                Attention = _encryptionService.Encrypt(projectRequest.Attention),
+                Business_Style = _encryptionService.Encrypt(projectRequest.Business_Style),
+                Client_Subject = _encryptionService.Encrypt(projectRequest.Client_Subject),
+                Representative = _encryptionService.Encrypt(projectRequest.Representative),
+                Account_Executive = _encryptionService.Encrypt(projectRequest.Account_Executive)
+            };
+            _Localdb.ClientsProject.Add(project);
+            await _Localdb.SaveChangesAsync();
+
+            await transaction.CommitAsync();
+            return Ok(new { clientId = client.Client_ID, projectId = project.Project_ID });
+        }
+
         // ------------------------------ CLIENTS PROJECT ------------------------------
 
         [HttpGet("GetLocalClientsProject")]
@@ -37,7 +113,6 @@ namespace APINIMIRHEMAA.Controllers
                 project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
                 project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
                 project.Representative = _encryptionService.Decrypt(project.Representative);
-                project.Contact_Person = _encryptionService.Decrypt(project.Contact_Person);
                 project.Account_Executive = _encryptionService.Decrypt(project.Account_Executive);
             }
 
@@ -71,7 +146,6 @@ namespace APINIMIRHEMAA.Controllers
             ClientProjectDetails.Business_Style = _encryptionService.Encrypt(ClientProjectDetails.Business_Style);
             ClientProjectDetails.Client_Subject = _encryptionService.Encrypt(ClientProjectDetails.Client_Subject);
             ClientProjectDetails.Representative = _encryptionService.Encrypt(ClientProjectDetails.Representative);
-            ClientProjectDetails.Contact_Person = _encryptionService.Encrypt(ClientProjectDetails.Contact_Person);
             ClientProjectDetails.Account_Executive = _encryptionService.Encrypt(ClientProjectDetails.Account_Executive);
             _Localdb.ClientsProject.Add(ClientProjectDetails);
             _Localdb.SaveChanges();
@@ -98,7 +172,6 @@ namespace APINIMIRHEMAA.Controllers
             updateClientsProject.Business_Style = UpdateClientsProject.Business_Style;
             updateClientsProject.Client_Subject = UpdateClientsProject.Client_Subject;
             updateClientsProject.Representative = UpdateClientsProject.Representative;
-            updateClientsProject.Contact_Person = UpdateClientsProject.Contact_Person;
             updateClientsProject.Account_Executive = UpdateClientsProject.Account_Executive;
             updateClientsProject.Date = UpdateClientsProject.Date;
             updateClientsProject.Time = UpdateClientsProject.Time;
@@ -181,7 +254,6 @@ namespace APINIMIRHEMAA.Controllers
             updateClientsProject.Business_Style = UpdateClientsProject.Business_Style;
             updateClientsProject.Client_Subject = UpdateClientsProject.Client_Subject;
             updateClientsProject.Representative = UpdateClientsProject.Representative;
-            updateClientsProject.Contact_Person = UpdateClientsProject.Contact_Person;
             updateClientsProject.Account_Executive = UpdateClientsProject.Account_Executive;
             updateClientsProject.Date = UpdateClientsProject.Date;
             updateClientsProject.Time = UpdateClientsProject.Time;
@@ -240,7 +312,6 @@ namespace APINIMIRHEMAA.Controllers
 
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            QuotationDetails.User_ID = User.FindFirstValue(ClaimTypes.NameIdentifier);
             _Localdb.Quotation.Add(QuotationDetails);
             _Localdb.SaveChanges();
             return Ok(QuotationDetails);
@@ -685,6 +756,132 @@ namespace APINIMIRHEMAA.Controllers
         public List<JobOrder> GetAllJobOrder()
         {
             return _Localdb.JobOrder.ToList();
+        }
+
+        [HttpGet("GetInstallationReportJobOrders")]
+        public async Task<ActionResult<IReadOnlyList<InstallationReportJobOrderOption>>> GetInstallationReportJobOrders()
+        {
+            var jobOrders = await _Localdb.JobOrder
+                .AsNoTracking()
+                .OrderByDescending(jobOrder => jobOrder.JobOrder_ID)
+                .ToListAsync();
+
+            if (jobOrders.Count == 0)
+            {
+                return Ok(Array.Empty<InstallationReportJobOrderOption>());
+            }
+
+            var conformeIds = jobOrders.Select(jobOrder => jobOrder.Conforme_FileID).Distinct().ToArray();
+            var conformes = await _Localdb.Conforme
+                .AsNoTracking()
+                .Where(conforme => conformeIds.Contains(conforme.FileID))
+                .Select(conforme => new { conforme.FileID, conforme.Quotation_ID })
+                .ToDictionaryAsync(conforme => conforme.FileID);
+
+            var quotationIds = conformes.Values.Select(conforme => conforme.Quotation_ID).Distinct().ToArray();
+            var quotations = await _Localdb.Quotation
+                .AsNoTracking()
+                .Where(quotation => quotationIds.Contains(quotation.Quotation_ID))
+                .Select(quotation => new { quotation.Quotation_ID, quotation.Project_ID, quotation.Title })
+                .ToDictionaryAsync(quotation => quotation.Quotation_ID);
+
+            var projectIds = quotations.Values.Select(quotation => quotation.Project_ID).Distinct().ToArray();
+            var projects = await _Localdb.ClientsProject
+                .AsNoTracking()
+                .Where(project => projectIds.Contains(project.Project_ID))
+                .Select(project => new { project.Project_ID, project.Client_ID })
+                .ToDictionaryAsync(project => project.Project_ID);
+
+            var clientIds = projects.Values.Select(project => project.Client_ID).Distinct().ToArray();
+            var clients = await _Localdb.Clients
+                .AsNoTracking()
+                .Where(client => clientIds.Contains(client.Client_ID))
+                .Select(client => new { client.Client_ID, client.Client_Name, client.Company_Address })
+                .ToDictionaryAsync(client => client.Client_ID);
+
+            var options = jobOrders.Select(jobOrder =>
+            {
+                string? clientName = null;
+                string? location = null;
+                string? quotationTitle = null;
+
+                if (conformes.TryGetValue(jobOrder.Conforme_FileID, out var conforme)
+                    && quotations.TryGetValue(conforme.Quotation_ID, out var quotation))
+                {
+                    quotationTitle = quotation.Title;
+                    if (projects.TryGetValue(quotation.Project_ID, out var project)
+                        && clients.TryGetValue(project.Client_ID, out var client))
+                    {
+                        clientName = client.Client_Name;
+                        location = client.Company_Address;
+                    }
+                }
+
+                return new InstallationReportJobOrderOption
+                {
+                    JobOrderId = jobOrder.JobOrder_ID,
+                    ClientName = clientName,
+                    ProjectName = string.IsNullOrWhiteSpace(jobOrder.Title) ? quotationTitle : jobOrder.Title,
+                    Location = location,
+                    InstallationDate = jobOrder.Installation_Date
+                };
+            }).ToArray();
+
+            return Ok(options);
+        }
+
+        [HttpPost("AddLocalInstallationReport")]
+        public async Task<ActionResult> AddLocalInstallationReport([FromBody] CreateInstallationReportRequest request)
+        {
+            if (!ModelState.IsValid)
+            {
+                return ValidationProblem(ModelState);
+            }
+
+            var jobOrderExists = await _Localdb.JobOrder
+                .AsNoTracking()
+                .AnyAsync(jobOrder => jobOrder.JobOrder_ID == request.JobOrderId);
+            if (!jobOrderExists)
+            {
+                return NotFound("The selected Job Order was not found.");
+            }
+
+            var report = new InstallationReport
+            {
+                JobOrder_ID = request.JobOrderId,
+                ClientName = request.ClientName,
+                ProjectName = request.ProjectName,
+                Location = request.Location,
+                ReportDate = request.ReportDate,
+                TimeStarted = request.TimeStarted,
+                TimeEnded = request.TimeEnded,
+                Installers = request.Installers,
+                OnTime = request.OnTime,
+                UniformAndId = request.UniformAndId,
+                GraphicsProperlyInstalled = request.GraphicsProperlyInstalled,
+                ProblemsOccurred = request.ProblemsOccurred,
+                ProblemsNote = request.ProblemsNote,
+                AreaClean = request.AreaClean,
+                InstallersMannered = request.InstallersMannered,
+                ClientRemarks = request.ClientRemarks,
+                Obstruction = request.Obstruction,
+                ObstructionDetails = request.ObstructionDetails,
+                GraphicsDamaged = request.GraphicsDamaged,
+                DamageDetails = request.DamageDetails,
+                InstallerRemarks = request.InstallerRemarks,
+                ClientSignature = request.ClientSignature,
+                PreparedBy = request.PreparedBy,
+                ApprovedBy = request.ApprovedBy
+            };
+
+            _Localdb.InstallationReport.Add(report);
+            await _Localdb.SaveChangesAsync();
+
+            return Ok(new
+            {
+                installationReportId = report.InstallationReport_ID,
+                jobOrderId = report.JobOrder_ID
+            });
         }
 
         [HttpGet("GetLocalJobOrderByID")]

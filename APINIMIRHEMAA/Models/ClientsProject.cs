@@ -11,7 +11,6 @@ namespace APINIMIRHEMAA.Models
         public string? Business_Style { get; set; }
         public string Client_Subject { get; set; }
         public string? Representative { get; set; }
-        public string? Contact_Person { get; set; }
         public string? Account_Executive { get; set; }
         public DateOnly? Date { get; set; }
         public TimeOnly? Time { get; set; }

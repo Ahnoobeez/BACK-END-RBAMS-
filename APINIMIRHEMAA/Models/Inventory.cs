@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
@@ -6,14 +7,21 @@ namespace APINIMIRHEMAA.Models
     {
         [Key]
         public int Inventory_ID { get; set; }
-        public int Beginning_Balance { get; set; }
-        public int Buffer { get; set; }
-        public int Purchased { get; set; }
-        public int Request { get; set; }
-        public int Returned { get; set; }
-        public int Balance { get; set; }
-        public string Status { get; set; }
+        public int? Beginning_Balance { get; set; }
+        public int? Buffer { get; set; }
+        public int? Purchased { get; set; }
+        public int? Request { get; set; }
+        public int? Returned { get; set; }
+        public int? Balance { get; set; }
+        public string? Status { get; set; }
         public int Material_ID { get; set; }
+
+        public int? Request_Balance { get; set; }
+        public int? Request_Purchased { get; set; }
+        public int? Request_Buffer { get; set; }
+
+        [NotMapped]
+        public int? Available_Balance => Balance;
 
     }
 }

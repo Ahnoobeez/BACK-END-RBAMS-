@@ -32,4 +32,10 @@
         public int TargetUserId { get; set; }
         public string AdminPassword { get; set; } = "";
     }
+    public class ChangePasswordDto
+    {
+        public string CurrentPassword { get; set; } = "";
+        public string NewPassword { get; set; } = "";
+        public string ConfirmNewPassword { get; set; } = "";
+    }
 }

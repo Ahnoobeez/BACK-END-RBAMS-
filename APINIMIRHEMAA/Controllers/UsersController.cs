@@ -105,16 +105,9 @@ namespace APINIMIRHEMAA.Controllers
             var target = _Localdb.Users.FirstOrDefault(u => u.User_ID == dto.TargetUserId);
             if (target == null) return NotFound();
 
-            var temp = GenerateTemporaryPassword();
-            target.PasswordHash = _passwords.Hash(temp);
+            target.PasswordHash = _passwords.Hash("mirhemaG123");
             _Localdb.SaveChanges();
-            return Ok(new { message = "Password reset.", temporaryPassword = temp });
-        }
-        private static string GenerateTemporaryPassword()
-        {
-            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-            return new string(Enumerable.Range(0, 12)
-                .Select(_ => chars[System.Security.Cryptography.RandomNumberGenerator.GetInt32(chars.Length)]).ToArray());
+            return Ok(new { message = "Password reset to the default password." });
         }
 
         [HttpGet("Me")]

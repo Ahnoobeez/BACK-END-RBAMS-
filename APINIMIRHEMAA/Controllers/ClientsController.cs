@@ -3,6 +3,7 @@ using APINIMIRHEMAA.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace APINIMIRHEMAA.Controllers
 {
@@ -20,10 +21,16 @@ namespace APINIMIRHEMAA.Controllers
             _Clouddb = Cloudcontext;
         }
 
+        private static IQueryable<ClientEntity> ClientsWithTelephoneAsText(DbSet<ClientEntity> clients)
+        {
+            return clients.FromSqlRaw(
+                "SELECT [Client_ID], COALESCE([Client_Name], N'') AS [Client_Name], COALESCE(CONVERT(nvarchar(16), [Client_Telephone]), N'') AS [Client_Telephone], [Contact_Person], [Client_EmailAddress], COALESCE([TermsAndCondition], N'') AS [TermsAndCondition], [Company_Address], COALESCE([TIN], N'') AS [TIN], [Payment_Terms] FROM [dbo].[Clients]");
+        }
+
         [HttpGet("GetLocalClients")] 
         public List<ClientEntity> GetAllLocalClients()
         {
-            return _Localdb.Clients.ToList();
+            return ClientsWithTelephoneAsText(_Localdb.Clients).ToList();
         }
 
         [HttpGet("GetLocalClientsById")]
@@ -33,7 +40,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var ClientDetails = _Localdb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var ClientDetails = ClientsWithTelephoneAsText(_Localdb.Clients).FirstOrDefault(x => x.Client_ID == Id);
             if (ClientDetails == null)
             {
                 return NotFound("Client not found.");
@@ -61,7 +68,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(ClientDetails);
             }
 
-            var clientDetails = _Localdb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var clientDetails = ClientsWithTelephoneAsText(_Localdb.Clients).FirstOrDefault(x => x.Client_ID == Id);
             if (clientDetails == null)
             {
                 return NotFound();
@@ -69,6 +76,8 @@ namespace APINIMIRHEMAA.Controllers
 
             clientDetails.Client_Name = ClientDetails.Client_Name;
             clientDetails.Client_Telephone = ClientDetails.Client_Telephone;
+            clientDetails.Contact_Person = ClientDetails.Contact_Person;
+            clientDetails.Client_EmailAddress = ClientDetails.Client_EmailAddress;
             clientDetails.TermsAndCondition = ClientDetails.TermsAndCondition;
             clientDetails.Company_Address = ClientDetails.Company_Address;
             clientDetails.TIN = ClientDetails.TIN;
@@ -84,7 +93,7 @@ namespace APINIMIRHEMAA.Controllers
         public ActionResult<ClientEntity> DeleteLocalClient(Int32 Id)
         {
 
-            var clientDetails = _Localdb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var clientDetails = ClientsWithTelephoneAsText(_Localdb.Clients).FirstOrDefault(x => x.Client_ID == Id);
             if (clientDetails == null)
             {
                 return NotFound();
@@ -99,7 +108,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetCloudClients")]
         public List<ClientEntity> GetAllCloudClients()
         {
-            return _Clouddb.Clients.ToList();
+            return ClientsWithTelephoneAsText(_Clouddb.Clients).ToList();
         }
 
         [HttpGet("GetCloudClientsById")]
@@ -109,7 +118,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var ClientDetails = _Clouddb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var ClientDetails = ClientsWithTelephoneAsText(_Clouddb.Clients).FirstOrDefault(x => x.Client_ID == Id);
             if (ClientDetails == null)
             {
                 return NotFound("Client not found.");
@@ -137,7 +146,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(ClientDetails);
             }
 
-            var clientDetails = _Clouddb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var clientDetails = ClientsWithTelephoneAsText(_Clouddb.Clients).FirstOrDefault(x => x.Client_ID == Id);
             if (clientDetails == null)
             {
                 return NotFound();
@@ -145,6 +154,8 @@ namespace APINIMIRHEMAA.Controllers
 
             clientDetails.Client_Name = ClientDetails.Client_Name;
             clientDetails.Client_Telephone = ClientDetails.Client_Telephone;
+            clientDetails.Contact_Person = ClientDetails.Contact_Person;
+            clientDetails.Client_EmailAddress = ClientDetails.Client_EmailAddress;
             clientDetails.TermsAndCondition = ClientDetails.TermsAndCondition;
             clientDetails.Company_Address = ClientDetails.Company_Address;
             clientDetails.TIN = ClientDetails.TIN;
@@ -160,7 +171,7 @@ namespace APINIMIRHEMAA.Controllers
         public ActionResult<ClientEntity> DeleteCloudClient(Int32 Id)
         {
 
-            var clientDetails = _Clouddb.Clients.FirstOrDefault(x => x.Client_ID == Id);
+            var clientDetails = ClientsWithTelephoneAsText(_Clouddb.Clients).FirstOrDefault(x => x.Client_ID == Id);
             if (clientDetails == null)
             {
                 return NotFound();
