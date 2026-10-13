@@ -1,5 +1,6 @@
 using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.ProjectViewer;
+using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,10 +13,12 @@ namespace APINIMIRHEMAA.Controllers
     public class ProjectViewerController : ControllerBase
     {
         private readonly LocalDbContext _localDb;
+        private readonly EncryptionService _encryptionService;
 
-        public ProjectViewerController(LocalDbContext localDb)
+        public ProjectViewerController(LocalDbContext localDb, EncryptionService encryptionService)
         {
             _localDb = localDb;
+            _encryptionService = encryptionService;
         }
 
         [HttpGet("Quotations")]
@@ -159,6 +162,15 @@ namespace APINIMIRHEMAA.Controllers
                     .AsNoTracking()
                     .Where(record => jobOrderIds.Contains(record.JobOrderID))
                     .ToListAsync();
+
+            if (project != null)
+            {
+                project.Attention = _encryptionService.Decrypt(project.Attention);
+                project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
+                project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
+                project.Representative = _encryptionService.Decrypt(project.Representative);
+                project.Account_Executive = _encryptionService.Decrypt(project.Account_Executive);
+            }
 
             return Ok(new ProjectViewerQuotationDetailsDto
             {
