@@ -47,18 +47,9 @@ namespace APINIMIRHEMAA.DTO.ClientsProject
     public sealed class ProjectRequestDetails
     {
         [Required]
-        public string? Attention { get; set; }
-
-        [Required]
         public string? Business_Style { get; set; }
 
         [Required]
         public string? Client_Subject { get; set; }
-
-        [Required]
-        public string? Representative { get; set; }
-
-        [Required]
-        public string? Account_Executive { get; set; }
     }
 }

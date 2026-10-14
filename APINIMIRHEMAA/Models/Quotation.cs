@@ -17,7 +17,6 @@ namespace APINIMIRHEMAA.Models
         public string? Terms_Condition { get; set; }
         public DateOnly Start_Date { get; set; }
         public TimeOnly Time { get; set; }
-        public DateOnly End_Date { get; set; }
         public int? User_ID { get; set; }
 
     }

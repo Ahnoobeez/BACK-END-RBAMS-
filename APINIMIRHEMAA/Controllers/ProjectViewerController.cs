@@ -165,11 +165,8 @@ namespace APINIMIRHEMAA.Controllers
 
             if (project != null)
             {
-                project.Attention = _encryptionService.Decrypt(project.Attention);
                 project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
                 project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
-                project.Representative = _encryptionService.Decrypt(project.Representative);
-                project.Account_Executive = _encryptionService.Decrypt(project.Account_Executive);
             }
 
             return Ok(new ProjectViewerQuotationDetailsDto

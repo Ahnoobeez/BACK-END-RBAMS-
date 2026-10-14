@@ -1,6 +1,7 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.ClientsProject;
 using APINIMIRHEMAA.DTO.InstallationReport;
+using APINIMIRHEMAA.DTO.InstallationSchedule;
 using APINIMIRHEMAA.Models;
 using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -87,11 +88,8 @@ namespace APINIMIRHEMAA.Controllers
             var project = new ClientsProject
             {
                 Client_ID = client.Client_ID,
-                Attention = _encryptionService.Encrypt(projectRequest.Attention),
                 Business_Style = _encryptionService.Encrypt(projectRequest.Business_Style),
-                Client_Subject = _encryptionService.Encrypt(projectRequest.Client_Subject),
-                Representative = _encryptionService.Encrypt(projectRequest.Representative),
-                Account_Executive = _encryptionService.Encrypt(projectRequest.Account_Executive)
+                Client_Subject = _encryptionService.Encrypt(projectRequest.Client_Subject)
             };
             _Localdb.ClientsProject.Add(project);
             await _Localdb.SaveChangesAsync();
@@ -109,11 +107,8 @@ namespace APINIMIRHEMAA.Controllers
 
             foreach (var project in projects)
             {
-                project.Attention = _encryptionService.Decrypt(project.Attention);
                 project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
                 project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
-                project.Representative = _encryptionService.Decrypt(project.Representative);
-                project.Account_Executive = _encryptionService.Decrypt(project.Account_Executive);
             }
 
             return projects;
@@ -142,11 +137,8 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(ModelState);
             }
 
-            ClientProjectDetails.Attention = _encryptionService.Encrypt(ClientProjectDetails.Attention);
             ClientProjectDetails.Business_Style = _encryptionService.Encrypt(ClientProjectDetails.Business_Style);
             ClientProjectDetails.Client_Subject = _encryptionService.Encrypt(ClientProjectDetails.Client_Subject);
-            ClientProjectDetails.Representative = _encryptionService.Encrypt(ClientProjectDetails.Representative);
-            ClientProjectDetails.Account_Executive = _encryptionService.Encrypt(ClientProjectDetails.Account_Executive);
             _Localdb.ClientsProject.Add(ClientProjectDetails);
             _Localdb.SaveChanges();
             return Ok(ClientProjectDetails);
@@ -168,11 +160,8 @@ namespace APINIMIRHEMAA.Controllers
 
             updateClientsProject.Project_ID = UpdateClientsProject.Project_ID;
             updateClientsProject.Client_ID = UpdateClientsProject.Client_ID;
-            updateClientsProject.Attention = UpdateClientsProject.Attention;
             updateClientsProject.Business_Style = UpdateClientsProject.Business_Style;
             updateClientsProject.Client_Subject = UpdateClientsProject.Client_Subject;
-            updateClientsProject.Representative = UpdateClientsProject.Representative;
-            updateClientsProject.Account_Executive = UpdateClientsProject.Account_Executive;
             updateClientsProject.Date = UpdateClientsProject.Date;
             updateClientsProject.Time = UpdateClientsProject.Time;
             updateClientsProject.Status = UpdateClientsProject.Status;
@@ -250,11 +239,8 @@ namespace APINIMIRHEMAA.Controllers
 
             updateClientsProject.Project_ID = UpdateClientsProject.Project_ID;
             updateClientsProject.Client_ID = UpdateClientsProject.Client_ID;
-            updateClientsProject.Attention = UpdateClientsProject.Attention;
             updateClientsProject.Business_Style = UpdateClientsProject.Business_Style;
             updateClientsProject.Client_Subject = UpdateClientsProject.Client_Subject;
-            updateClientsProject.Representative = UpdateClientsProject.Representative;
-            updateClientsProject.Account_Executive = UpdateClientsProject.Account_Executive;
             updateClientsProject.Date = UpdateClientsProject.Date;
             updateClientsProject.Time = UpdateClientsProject.Time;
 
@@ -405,7 +391,6 @@ namespace APINIMIRHEMAA.Controllers
             updateQuotation.Terms_Condition = UpdateQuotation.Terms_Condition;
             updateQuotation.Start_Date = UpdateQuotation.Start_Date;
             updateQuotation.Time = UpdateQuotation.Time;
-            updateQuotation.End_Date = UpdateQuotation.End_Date;
 
             _CloudDb.SaveChanges();
             return Ok(UpdateQuotation);
@@ -1645,51 +1630,24 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(installationSchedule);
         }
 
-        [HttpPost("AddLocalInstallation_Schedule")]
-        public ActionResult<Installation_Schedule> AddLocalInstallationSchedule(Installation_Schedule installationSchedule)
+        [HttpGet("GetLocalInstallationScheduleEmployeeAssignments")]
+        public ActionResult<List<InstallationScheduleEmployeeAssignmentDto>> GetLocalInstallationScheduleEmployeeAssignments()
         {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-            _Localdb.Add(installationSchedule);
-            _Localdb.SaveChanges();
-            return Ok(installationSchedule);
-        }
+            var assignments = (
+                from assignment in _Localdb.Installation_Schedule_Employee.AsNoTracking()
+                join employee in _Localdb.Employee.AsNoTracking()
+                    on assignment.Employee_Id equals employee.Employee_Id
+                orderby assignment.Installation_ID, employee.LastName, employee.FirstName
+                select new InstallationScheduleEmployeeAssignmentDto
+                {
+                    Installation_ID = assignment.Installation_ID,
+                    Employee_Id = employee.Employee_Id,
+                    FirstName = employee.FirstName,
+                    LastName = employee.LastName
+                })
+                .ToList();
 
-        [HttpPost("UpdateLocalInstallation_Schedule")]
-        public ActionResult<Installation_Schedule> UpdateLocalInstallationSchedule(Int32 Id, [FromBody] Installation_Schedule installationSchedule)
-        {
-            if (installationSchedule == null)
-            {
-                return BadRequest(installationSchedule);
-            }
-            var updateInstallationSchedule = _Localdb.Installation_Schedule.FirstOrDefault(x => x.Installation_ID == Id);
-            if (updateInstallationSchedule == null)
-            {
-                return NotFound();
-            }
-            updateInstallationSchedule.Installation_ID = installationSchedule.Installation_ID;
-            updateInstallationSchedule.Time = installationSchedule.Time;
-            updateInstallationSchedule.Remarks = installationSchedule.Remarks;
-            updateInstallationSchedule.Mall_Hours = installationSchedule.Mall_Hours;
-            updateInstallationSchedule.Date = installationSchedule.Date;
-            updateInstallationSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
-            _Localdb.SaveChanges();
-            return Ok(updateInstallationSchedule);
-        }
-
-        [HttpPut ("DeleteLocalInstallationSchedule")]
-        public ActionResult DeleteLocalInstallationSchedule(int id)
-        {
-            var installationSchedule = _Localdb.Installation_Schedule.FirstOrDefault(x => x.Installation_ID == id);
-            if (installationSchedule == null)
-            {
-                return NotFound();
-            }
-            _Localdb.Remove(installationSchedule);
-            _Localdb.SaveChanges();
-            return NoContent();
+            return Ok(assignments);
         }
 
         [HttpGet("GetCloudInstallationSchedule")]
@@ -1711,53 +1669,6 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             return Ok(installationSchedule);
-        }
-
-        [HttpPost("AddCloudInstallation_Schedule")]
-        public ActionResult<Installation_Schedule> AddCloudInstallationSchedule(Installation_Schedule installationSchedule)
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-            _CloudDb.Add(installationSchedule);
-            _CloudDb.SaveChanges();
-            return Ok(installationSchedule);
-        }
-
-        [HttpPost("UpdateCloudInstallation_Schedule")]
-        public ActionResult<Installation_Schedule> UpdateCloudInstallationSchedule(Int32 Id, [FromBody] Installation_Schedule installationSchedule)
-        {
-            if (installationSchedule == null)
-            {
-                return BadRequest(installationSchedule);
-            }
-            var updateInstallationSchedule = _CloudDb.Installation_Schedule.FirstOrDefault(x => x.Installation_ID == Id);
-            if (updateInstallationSchedule == null)
-            {
-                return NotFound();
-            }
-            updateInstallationSchedule.Installation_ID = installationSchedule.Installation_ID;
-            updateInstallationSchedule.Time = installationSchedule.Time;
-            updateInstallationSchedule.Remarks = installationSchedule.Remarks;
-            updateInstallationSchedule.Mall_Hours = installationSchedule.Mall_Hours;
-            updateInstallationSchedule.Date = installationSchedule.Date;
-            updateInstallationSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
-            _CloudDb.SaveChanges();
-            return Ok(updateInstallationSchedule);
-        }
-
-        [HttpPut("DeleteCloudInstallationSchedule")]
-        public ActionResult DeleteCloudInstallationSchedule(int id)
-        {
-            var installationSchedule = _CloudDb.Installation_Schedule.FirstOrDefault(x => x.Installation_ID == id);
-            if (installationSchedule == null)
-            {
-                return NotFound();
-            }
-            _CloudDb.Remove(installationSchedule);
-            _CloudDb.SaveChanges();
-            return NoContent();
         }
 
         // ------------------------------- INSTALLATION SCHEDULE ---------------------------

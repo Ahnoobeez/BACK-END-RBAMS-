@@ -326,6 +326,80 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(installationSchedule);
         }
 
+        [HttpPost("AddLocalInstallation_Schedule")]
+        public ActionResult<Installation_Schedule> AddLocalInstallationSchedule([FromBody] Installation_Schedule installationSchedule)
+        {
+            if (!ModelState.IsValid || installationSchedule == null ||
+                installationSchedule.JobOrder_ID <= 0 ||
+                installationSchedule.Date == default ||
+                string.IsNullOrWhiteSpace(installationSchedule.Mall_Hours))
+            {
+                return BadRequest("A valid job order, date, and mall-hours group are required.");
+            }
+            if (!_Localdb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
+            {
+                return BadRequest("The selected Job Order was not found.");
+            }
+
+            installationSchedule.Installation_ID = 0;
+            _Localdb.Installation_Schedule.Add(installationSchedule);
+            _Localdb.SaveChanges();
+            return Ok(installationSchedule);
+        }
+
+        [HttpPost("UpdateLocalInstallation_Schedule")]
+        public ActionResult<Installation_Schedule> UpdateLocalInstallationSchedule(int Id, [FromBody] Installation_Schedule installationSchedule)
+        {
+            if (Id <= 0 || installationSchedule == null ||
+                installationSchedule.JobOrder_ID <= 0 ||
+                installationSchedule.Date == default ||
+                string.IsNullOrWhiteSpace(installationSchedule.Mall_Hours))
+            {
+                return BadRequest("A valid schedule row, job order, date, and mall-hours group are required.");
+            }
+            if (!_Localdb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
+            {
+                return BadRequest("The selected Job Order was not found.");
+            }
+
+            var existingSchedule = _Localdb.Installation_Schedule.FirstOrDefault(schedule => schedule.Installation_ID == Id);
+            if (existingSchedule == null)
+            {
+                return NotFound();
+            }
+
+            existingSchedule.Time = installationSchedule.Time;
+            existingSchedule.Remarks = installationSchedule.Remarks;
+            existingSchedule.Mall_Hours = installationSchedule.Mall_Hours;
+            existingSchedule.Date = installationSchedule.Date;
+            existingSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
+            _Localdb.SaveChanges();
+            return Ok(existingSchedule);
+        }
+
+        [HttpPut("DeleteLocalInstallationSchedule")]
+        public IActionResult DeleteLocalInstallationSchedule(int id)
+        {
+            if (id <= 0)
+            {
+                return BadRequest("A valid schedule row is required.");
+            }
+
+            var installationSchedule = _Localdb.Installation_Schedule.FirstOrDefault(schedule => schedule.Installation_ID == id);
+            if (installationSchedule == null)
+            {
+                return NotFound();
+            }
+
+            var assignments = _Localdb.Installation_Schedule_Employee
+                .Where(assignment => assignment.Installation_ID == id)
+                .ToList();
+            _Localdb.Installation_Schedule_Employee.RemoveRange(assignments);
+            _Localdb.Installation_Schedule.Remove(installationSchedule);
+            _Localdb.SaveChanges();
+            return NoContent();
+        }
+
         [HttpGet("GetLocalInstallationScheduleEmployees")]
         public ActionResult<List<InstallationScheduleEmployeeOptionDto>> GetLocalInstallationScheduleEmployees()
         {
@@ -449,6 +523,76 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
             return Ok(installationSchedule);
+        }
+
+        [HttpPost("AddCloudInstallation_Schedule")]
+        public ActionResult<Installation_Schedule> AddCloudInstallationSchedule([FromBody] Installation_Schedule installationSchedule)
+        {
+            if (!ModelState.IsValid || installationSchedule == null ||
+                installationSchedule.JobOrder_ID <= 0 ||
+                installationSchedule.Date == default ||
+                string.IsNullOrWhiteSpace(installationSchedule.Mall_Hours))
+            {
+                return BadRequest("A valid job order, date, and mall-hours group are required.");
+            }
+            if (!_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
+            {
+                return BadRequest("The selected Job Order was not found.");
+            }
+
+            installationSchedule.Installation_ID = 0;
+            _CloudDb.Installation_Schedule.Add(installationSchedule);
+            _CloudDb.SaveChanges();
+            return Ok(installationSchedule);
+        }
+
+        [HttpPost("UpdateCloudInstallation_Schedule")]
+        public ActionResult<Installation_Schedule> UpdateCloudInstallationSchedule(int Id, [FromBody] Installation_Schedule installationSchedule)
+        {
+            if (Id <= 0 || installationSchedule == null ||
+                installationSchedule.JobOrder_ID <= 0 ||
+                installationSchedule.Date == default ||
+                string.IsNullOrWhiteSpace(installationSchedule.Mall_Hours))
+            {
+                return BadRequest("A valid schedule row, job order, date, and mall-hours group are required.");
+            }
+            if (!_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
+            {
+                return BadRequest("The selected Job Order was not found.");
+            }
+
+            var existingSchedule = _CloudDb.Installation_Schedule.FirstOrDefault(schedule => schedule.Installation_ID == Id);
+            if (existingSchedule == null)
+            {
+                return NotFound();
+            }
+
+            existingSchedule.Time = installationSchedule.Time;
+            existingSchedule.Remarks = installationSchedule.Remarks;
+            existingSchedule.Mall_Hours = installationSchedule.Mall_Hours;
+            existingSchedule.Date = installationSchedule.Date;
+            existingSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
+            _CloudDb.SaveChanges();
+            return Ok(existingSchedule);
+        }
+
+        [HttpPut("DeleteCloudInstallationSchedule")]
+        public IActionResult DeleteCloudInstallationSchedule(int id)
+        {
+            if (id <= 0)
+            {
+                return BadRequest("A valid schedule row is required.");
+            }
+
+            var installationSchedule = _CloudDb.Installation_Schedule.FirstOrDefault(schedule => schedule.Installation_ID == id);
+            if (installationSchedule == null)
+            {
+                return NotFound();
+            }
+
+            _CloudDb.Installation_Schedule.Remove(installationSchedule);
+            _CloudDb.SaveChanges();
+            return NoContent();
         }
 
         // ----------------------------------- INSTALLATION SCHEDULE -----------------------------------
@@ -618,11 +762,8 @@ namespace APINIMIRHEMAA.Controllers
 
             foreach (var project in projects)
             {
-                project.Attention = _encryptionService.Decrypt(project.Attention);
                 project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
                 project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
-                project.Representative = _encryptionService.Decrypt(project.Representative);
-                project.Account_Executive = _encryptionService.Decrypt(project.Account_Executive);
             }
 
             return projects;
