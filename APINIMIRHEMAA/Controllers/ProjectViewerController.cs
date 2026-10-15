@@ -107,7 +107,9 @@ namespace APINIMIRHEMAA.Controllers
                     Description = item.Description,
                     Width = item.Width,
                     Height = item.Height,
+                    MeasurementUnit = item.Measurement_Unit,
                     Quantity = item.Quantity,
+                    PricePerSquareInch = item.Price_Per_Square_Inch,
                     UnitPrice = item.Unit_Price,
                     TotalAmount = item.Total_Amount
                 };
@@ -162,6 +164,18 @@ namespace APINIMIRHEMAA.Controllers
                     .AsNoTracking()
                     .Where(record => jobOrderIds.Contains(record.JobOrderID))
                     .ToListAsync();
+            var serviceInvoices = jobOrderIds.Count == 0
+                ? new List<Models.ServiceInvoice>()
+                : await _localDb.ServiceInvoice
+                    .AsNoTracking()
+                    .Where(record => record.JobOrder_ID.HasValue && jobOrderIds.Contains(record.JobOrder_ID.Value))
+                    .ToListAsync();
+            var installationReports = jobOrderIds.Count == 0
+                ? new List<Models.InstallationReport>()
+                : await _localDb.InstallationReport
+                    .AsNoTracking()
+                    .Where(record => jobOrderIds.Contains(record.JobOrder_ID))
+                    .ToListAsync();
 
             if (project != null)
             {
@@ -194,6 +208,8 @@ namespace APINIMIRHEMAA.Controllers
                         .ToList()
                 }).ToList(),
                 CollectionReceipts = collectionReceipts,
+                ServiceInvoices = serviceInvoices,
+                InstallationReports = installationReports,
                 QuotationStores = stores,
                 QuotationItems = quotationItems,
                 Items = items

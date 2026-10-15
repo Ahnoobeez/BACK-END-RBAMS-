@@ -6,6 +6,7 @@ namespace APINIMIRHEMAA.Models
     {
         [Key]
         public int Quantity { get; set; }
+        public int? JobOrder_ID { get; set; }
         public int Unit { get; set; }
         public string Description { get; set; }
         public int Unit_Price { get; set; }

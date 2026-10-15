@@ -42,6 +42,10 @@ namespace APINIMIRHEMAA.DTO.ClientsProject
 
         [Required]
         public string? Payment_Terms { get; set; }
+
+        [Required]
+        [Range(typeof(decimal), "0", "99999999999999.9999")]
+        public decimal? Price_Per_Square_Inch { get; set; }
     }
 
     public sealed class ProjectRequestDetails

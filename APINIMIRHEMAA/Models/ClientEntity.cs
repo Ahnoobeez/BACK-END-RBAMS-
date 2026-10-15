@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
@@ -25,5 +26,8 @@ namespace APINIMIRHEMAA.Models
         [RegularExpression(@"^\d{3}-\d{3}-\d{3}(-\d{3})?$", ErrorMessage = "TIN must be formatted as XXX-XXX-XXX or XXX-XXX-XXX-XXX.")]
         public string? TIN { get; set; }
         public string? Payment_Terms { get; set; }
+        [Column(TypeName = "decimal(18,4)")]
+        [Range(typeof(decimal), "0", "99999999999999.9999")]
+        public decimal Price_Per_Square_Inch { get; set; }
     }
 }

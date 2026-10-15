@@ -79,7 +79,8 @@ namespace APINIMIRHEMAA.Controllers
                 TermsAndCondition = clientRequest.TermsAndCondition,
                 Company_Address = clientRequest.Company_Address,
                 TIN = clientRequest.TIN,
-                Payment_Terms = clientRequest.Payment_Terms
+                Payment_Terms = clientRequest.Payment_Terms,
+                Price_Per_Square_Inch = clientRequest.Price_Per_Square_Inch!.Value
             };
             _Localdb.Clients.Add(client);
             await _Localdb.SaveChangesAsync();
@@ -383,8 +384,9 @@ namespace APINIMIRHEMAA.Controllers
             updateQuotation.Quotation_ID = UpdateQuotation.Quotation_ID;
             updateQuotation.Project_ID = UpdateQuotation.Project_ID;
             updateQuotation.Sub_Total = UpdateQuotation.Sub_Total;
-            updateQuotation.Less_Discount = UpdateQuotation.Less_Discount;
-            updateQuotation.Ingress_and_Engress = UpdateQuotation.Ingress_and_Engress;
+            updateQuotation.Delivery_Charge = UpdateQuotation.Delivery_Charge;
+            updateQuotation.Installation_Charge = UpdateQuotation.Installation_Charge;
+            updateQuotation.VAT = UpdateQuotation.VAT;
             updateQuotation.Overall_Total = UpdateQuotation.Overall_Total;
             updateQuotation.Status = UpdateQuotation.Status;
             updateQuotation.Comment = UpdateQuotation.Comment;
@@ -464,7 +466,9 @@ namespace APINIMIRHEMAA.Controllers
             updateQuotationItems.Description = UpdateQuotationItems.Description;
             updateQuotationItems.Width = UpdateQuotationItems.Width;
             updateQuotationItems.Height = UpdateQuotationItems.Height;
+            updateQuotationItems.Measurement_Unit = UpdateQuotationItems.Measurement_Unit;
             updateQuotationItems.Quantity = UpdateQuotationItems.Quantity;
+            updateQuotationItems.Price_Per_Square_Inch = UpdateQuotationItems.Price_Per_Square_Inch;
             updateQuotationItems.Unit_Price = UpdateQuotationItems.Unit_Price;
             updateQuotationItems.Total_Amount = UpdateQuotationItems.Total_Amount;
             updateQuotationItems.QS_ID = UpdateQuotationItems.QS_ID;
@@ -891,7 +895,19 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+
+            var conforme = _Localdb.Conforme.FirstOrDefault(x => x.FileID == jobOrder.Conforme_FileID);
+            if (conforme == null)
+            {
+                return BadRequest($"Conforme {jobOrder.Conforme_FileID} was not found.");
+            }
+
             _Localdb.Add(jobOrder);
+            conforme.Status = "Completed";
+            foreach (var purchaseOrder in _Localdb.PurchaseOrder.Where(x => x.Conforme_FileID == jobOrder.Conforme_FileID))
+            {
+                purchaseOrder.Status = "Completed";
+            }
             _Localdb.SaveChanges();
             return Ok(jobOrder);
         }
@@ -958,7 +974,19 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+
+            var conforme = _CloudDb.Conforme.FirstOrDefault(x => x.FileID == jobOrder.Conforme_FileID);
+            if (conforme == null)
+            {
+                return BadRequest($"Conforme {jobOrder.Conforme_FileID} was not found.");
+            }
+
             _CloudDb.Add(jobOrder);
+            conforme.Status = "Completed";
+            foreach (var purchaseOrder in _CloudDb.PurchaseOrder.Where(x => x.Conforme_FileID == jobOrder.Conforme_FileID))
+            {
+                purchaseOrder.Status = "Completed";
+            }
             _CloudDb.SaveChanges();
             return Ok(jobOrder);
         }
@@ -1174,6 +1202,7 @@ namespace APINIMIRHEMAA.Controllers
             var error = UploadValidator.ValidatePdf(purchaseOrder.FileData);
             if (error != null) return BadRequest(error);
 
+            purchaseOrder.Status = "Pending";
             var plain = purchaseOrder.FileData;
             purchaseOrder.FileData = _encryptionService.Encrypt(plain);
             _Localdb.PurchaseOrder.Add(purchaseOrder);
@@ -1197,6 +1226,7 @@ namespace APINIMIRHEMAA.Controllers
 
             foreach (var f in purchaseOrders)
             {
+                f.Status = "Pending";
                 f.FileData = _encryptionService.Encrypt(f.FileData);
                 _Localdb.PurchaseOrder.Add(f);
             }
@@ -1265,6 +1295,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            purchaseOrder.Status = "Pending";
             _CloudDb.Add(purchaseOrder);
             _CloudDb.SaveChanges();
             return Ok(purchaseOrder);
@@ -1476,34 +1507,42 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpGet("GetLocalServiceInvoiceByID")]
-        public ActionResult<Graphics> GetLocalServiceInvoiceID(int id)
+        public ActionResult<ServiceInvoice> GetLocalServiceInvoiceID(int id)
         {
             if (id == 0)
             {
-                return BadRequest("Invalid client ID.");
+                return BadRequest("Invalid service invoice ID.");
             }
-            var graphics = _Localdb.Graphics.FirstOrDefault(x => x.FileID == id);
-            if (graphics == null)
+            var serviceInvoice = _Localdb.ServiceInvoice.FirstOrDefault(x => x.Quantity == id);
+            if (serviceInvoice == null)
             {
                 return NotFound();
             }
-            return Ok(graphics);
+            return Ok(serviceInvoice);
         }
 
         [HttpPost("AddLocalServiceInvoice")]
-        public ActionResult<Graphics> AddLocalServiceInvoice(Graphics graphics)
+        public ActionResult<ServiceInvoice> AddLocalServiceInvoice([FromBody] ServiceInvoice serviceInvoice)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
-            _Localdb.Add(graphics);
+            if (serviceInvoice.JobOrder_ID is not > 0)
+            {
+                return BadRequest("A valid Job Order is required for a Service Invoice.");
+            }
+            if (!_Localdb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == serviceInvoice.JobOrder_ID))
+            {
+                return NotFound("The selected Job Order was not found.");
+            }
+            _Localdb.ServiceInvoice.Add(serviceInvoice);
             _Localdb.SaveChanges();
-            return Ok(graphics);
+            return Ok(serviceInvoice);
         }
 
         [HttpPost("UpdateLocalServiceInvoice")]
-        public ActionResult<Graphics> UpdateLocalServiceInvoice(Int32 Id, [FromBody] ServiceInvoice serviceInvoice)
+        public ActionResult<ServiceInvoice> UpdateLocalServiceInvoice(Int32 Id, [FromBody] ServiceInvoice serviceInvoice)
         {
             if (serviceInvoice == null)
             {
@@ -1514,7 +1553,16 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
+            if (serviceInvoice.JobOrder_ID is not > 0)
+            {
+                return BadRequest("A valid Job Order is required for a Service Invoice.");
+            }
+            if (!_Localdb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == serviceInvoice.JobOrder_ID))
+            {
+                return NotFound("The selected Job Order was not found.");
+            }
             updateServiceInvoice.Quantity = serviceInvoice.Quantity;
+            updateServiceInvoice.JobOrder_ID = serviceInvoice.JobOrder_ID;
             updateServiceInvoice.Unit = serviceInvoice.Unit;
             updateServiceInvoice.Description = serviceInvoice.Description;
             updateServiceInvoice.Unit_Price = serviceInvoice.Unit_Price;
@@ -1546,34 +1594,42 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpGet("GetCloudServiceInvoiceByID")]
-        public ActionResult<Graphics> GetCloudServiceInvoiceID(int id)
+        public ActionResult<ServiceInvoice> GetCloudServiceInvoiceID(int id)
         {
             if (id == 0)
             {
-                return BadRequest("Invalid client ID.");
+                return BadRequest("Invalid service invoice ID.");
             }
-            var graphics = _CloudDb.Graphics.FirstOrDefault(x => x.FileID == id);
-            if (graphics == null)
+            var serviceInvoice = _CloudDb.ServiceInvoice.FirstOrDefault(x => x.Quantity == id);
+            if (serviceInvoice == null)
             {
                 return NotFound();
             }
-            return Ok(graphics);
+            return Ok(serviceInvoice);
         }
 
         [HttpPost("AddCloudServiceInvoice")]
-        public ActionResult<Graphics> AddCloudServiceInvoice(Graphics graphics)
+        public ActionResult<ServiceInvoice> AddCloudServiceInvoice([FromBody] ServiceInvoice serviceInvoice)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
-            _CloudDb.Add(graphics);
+            if (serviceInvoice.JobOrder_ID is not > 0)
+            {
+                return BadRequest("A valid Job Order is required for a Service Invoice.");
+            }
+            if (!_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == serviceInvoice.JobOrder_ID))
+            {
+                return NotFound("The selected Job Order was not found.");
+            }
+            _CloudDb.ServiceInvoice.Add(serviceInvoice);
             _CloudDb.SaveChanges();
-            return Ok(graphics);
+            return Ok(serviceInvoice);
         }
 
         [HttpPost("UpdateCloudServiceInvoice")]
-        public ActionResult<Graphics> UpdateCloudServiceInvoice(Int32 Id, [FromBody] ServiceInvoice serviceInvoice)
+        public ActionResult<ServiceInvoice> UpdateCloudServiceInvoice(Int32 Id, [FromBody] ServiceInvoice serviceInvoice)
         {
             if (serviceInvoice == null)
             {
@@ -1584,11 +1640,21 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
+            if (serviceInvoice.JobOrder_ID is not > 0)
+            {
+                return BadRequest("A valid Job Order is required for a Service Invoice.");
+            }
+            if (!_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == serviceInvoice.JobOrder_ID))
+            {
+                return NotFound("The selected Job Order was not found.");
+            }
             updateServiceInvoice.Quantity = serviceInvoice.Quantity;
+            updateServiceInvoice.JobOrder_ID = serviceInvoice.JobOrder_ID;
             updateServiceInvoice.Unit = serviceInvoice.Unit;
             updateServiceInvoice.Description = serviceInvoice.Description;
             updateServiceInvoice.Unit_Price = serviceInvoice.Unit_Price;
             updateServiceInvoice.Amount = serviceInvoice.Amount;
+            updateServiceInvoice.Status = serviceInvoice.Status;
             _CloudDb.SaveChanges();
             return Ok(updateServiceInvoice);
         }

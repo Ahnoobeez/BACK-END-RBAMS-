@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
@@ -8,10 +9,16 @@ namespace APINIMIRHEMAA.Models
         public int Quotation_ID { get; set; }
         public int Project_ID { get; set; }
         public string? Title { get; set; }
-        public int Sub_Total { get; set; }
-        public int? Less_Discount { get; set; }
-        public int? Ingress_and_Engress { get; set; }
-        public int Overall_Total { get; set; }
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal Sub_Total { get; set; }
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? Delivery_Charge { get; set; }
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? Installation_Charge { get; set; }
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? VAT { get; set; }
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal Overall_Total { get; set; }
         public string? Status { get; set; }
         public string? Comment { get; set; }
         public string? Terms_Condition { get; set; }
