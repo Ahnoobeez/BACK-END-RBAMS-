@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Graphics
+    public class Graphics : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int FileID { get; set; }
         public string FileName { get; set; }

@@ -1,5 +1,4 @@
 ﻿using APINIMIRHEMAA.Data;
-using APINIMIRHEMAA.DTO.ClientsProject;
 using APINIMIRHEMAA.DTO.InstallationReport;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
 using APINIMIRHEMAA.Models;
@@ -8,7 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.ComponentModel.DataAnnotations;
+using System.Data;
 using System.Security.Claims;
 
 namespace APINIMIRHEMAA.Controllers
@@ -28,254 +27,55 @@ namespace APINIMIRHEMAA.Controllers
             _encryptionService = encryptionService;
         }
 
-        [HttpPost("AddLocalClientAndProject")]
-        public async Task<ActionResult> AddLocalClientAndProject([FromBody] CreateClientAndProjectRequest request)
-        {
-            if (request?.Client == null || request.Project == null)
-            {
-                return BadRequest("Both client information and project request details are required.");
-            }
-
-            var clientValidationResults = new List<ValidationResult>();
-            Validator.TryValidateObject(
-                request.Client,
-                new ValidationContext(request.Client),
-                clientValidationResults,
-                validateAllProperties: true);
-            foreach (var result in clientValidationResults)
-            {
-                ModelState.AddModelError(
-                    $"Client.{result.MemberNames.FirstOrDefault() ?? string.Empty}",
-                    result.ErrorMessage ?? "Client information is invalid.");
-            }
-
-            var projectValidationResults = new List<ValidationResult>();
-            Validator.TryValidateObject(
-                request.Project,
-                new ValidationContext(request.Project),
-                projectValidationResults,
-                validateAllProperties: true);
-            foreach (var result in projectValidationResults)
-            {
-                ModelState.AddModelError(
-                    $"Project.{result.MemberNames.FirstOrDefault() ?? string.Empty}",
-                    result.ErrorMessage ?? "Project request details are invalid.");
-            }
-
-            if (!ModelState.IsValid)
-            {
-                return ValidationProblem(ModelState);
-            }
-
-            await using var transaction = await _Localdb.Database.BeginTransactionAsync();
-
-            var clientRequest = request.Client;
-            var client = new ClientEntity
-            {
-                Client_Name = clientRequest.Client_Name!,
-                Client_Telephone = clientRequest.Client_Telephone!,
-                Contact_Person = clientRequest.Contact_Person,
-                Client_EmailAddress = clientRequest.Client_EmailAddress,
-                TermsAndCondition = clientRequest.TermsAndCondition,
-                Company_Address = clientRequest.Company_Address,
-                TIN = clientRequest.TIN,
-                Payment_Terms = clientRequest.Payment_Terms,
-                Price_Per_Square_Inch = clientRequest.Price_Per_Square_Inch!.Value
-            };
-            _Localdb.Clients.Add(client);
-            await _Localdb.SaveChangesAsync();
-
-            var projectRequest = request.Project;
-            var project = new ClientsProject
-            {
-                Client_ID = client.Client_ID,
-                Business_Style = _encryptionService.Encrypt(projectRequest.Business_Style),
-                Client_Subject = _encryptionService.Encrypt(projectRequest.Client_Subject)
-            };
-            _Localdb.ClientsProject.Add(project);
-            await _Localdb.SaveChangesAsync();
-
-            await transaction.CommitAsync();
-            return Ok(new { clientId = client.Client_ID, projectId = project.Project_ID });
-        }
-
-        // ------------------------------ CLIENTS PROJECT ------------------------------
-
-        [HttpGet("GetLocalClientsProject")]
-        public List<ClientsProject> GetAllLocalClientsProject()
-        {
-            var projects = _Localdb.ClientsProject.ToList();
-
-            foreach (var project in projects)
-            {
-                project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
-                project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
-            }
-
-            return projects;
-        }
-
-        [HttpGet("GetLocalClientsProjectById")]
-        public ActionResult<ClientsProject> GetLocalClientProjectDetails(Int32 Id)
-        {
-            if (Id == 0)
-            {
-                return BadRequest("Invalid client ID.");
-            }
-            var ClientProjectDetails = _Localdb.ClientsProject.FirstOrDefault(x => x.Project_ID == Id);
-            if (ClientProjectDetails == null)
-            {
-                return NotFound("Client not found.");
-            }
-            return ClientProjectDetails;
-        }
-
-        [HttpPost("AddLocalClientsProject")] 
-        public ActionResult<ClientsProject> AddLocalClientsProject([FromBody] ClientsProject ClientProjectDetails)
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            ClientProjectDetails.Business_Style = _encryptionService.Encrypt(ClientProjectDetails.Business_Style);
-            ClientProjectDetails.Client_Subject = _encryptionService.Encrypt(ClientProjectDetails.Client_Subject);
-            _Localdb.ClientsProject.Add(ClientProjectDetails);
-            _Localdb.SaveChanges();
-            return Ok(ClientProjectDetails);
-        }
-
-        [HttpPost("UpdateLocalClientsProjectDetails")]
-        public ActionResult<ClientsProject> UpdateLocalClientsProject(Int32 Id, [FromBody] ClientsProject UpdateClientsProject)
-        {
-            if (UpdateClientsProject == null)
-            {
-                return BadRequest(UpdateClientsProject);
-            }
-
-            var updateClientsProject = _Localdb.ClientsProject.FirstOrDefault(x => x.Project_ID == Id);
-            if (updateClientsProject == null)
-            {
-                return NotFound();
-            }
-
-            updateClientsProject.Project_ID = UpdateClientsProject.Project_ID;
-            updateClientsProject.Client_ID = UpdateClientsProject.Client_ID;
-            updateClientsProject.Business_Style = UpdateClientsProject.Business_Style;
-            updateClientsProject.Client_Subject = UpdateClientsProject.Client_Subject;
-            updateClientsProject.Date = UpdateClientsProject.Date;
-            updateClientsProject.Time = UpdateClientsProject.Time;
-            updateClientsProject.Status = UpdateClientsProject.Status;
-
-
-            _Localdb.SaveChanges();
-
-
-            return Ok(UpdateClientsProject);
-        }
-
-        [HttpPut("DeleteLocalClientsProject")]
-        public ActionResult<ClientsProject> DeleteLocalClientProject(Int32 Id)
-        {
-
-            var clientProjectDetails = _Localdb.ClientsProject.FirstOrDefault(x => x.Project_ID == Id);
-            if (clientProjectDetails == null)
-            {
-                return NotFound();
-            }
-            _Localdb.Remove(clientProjectDetails);
-            _Localdb.SaveChanges();
-
-
-            return NoContent();
-        }
-
-
-        [HttpGet("GetCloudClientsProject")]
-        public List<ClientsProject> GetAllCloudClientsProject()
-        {
-            return _CloudDb.ClientsProject.ToList();
-        }
-
-        [HttpGet("GetCloudClientsProjectById")]
-        public ActionResult<ClientsProject> GetCloudClientProjectDetails(Int32 Id)
-        {
-            if (Id == 0)
-            {
-                return BadRequest("Invalid client ID.");
-            }
-            var ClientProjectDetails = _CloudDb.ClientsProject.FirstOrDefault(x => x.Project_ID == Id);
-            if (ClientProjectDetails == null)
-            {
-                return NotFound("Client not found.");
-            }
-            return ClientProjectDetails;
-        }
-
-        [HttpPost("AddCloudClientsProject")]
-        public ActionResult<ClientsProject> AddCloudClientsProject([FromBody] ClientsProject ClientProjectDetails)
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-            _CloudDb.ClientsProject.Add(ClientProjectDetails);
-            _CloudDb.SaveChanges();
-            return Ok(ClientProjectDetails);
-        }
-
-        [HttpPost("UpdateCloudClientsProjectDetails")]
-        public ActionResult<ClientsProject> UpdateCloudClientsProject(Int32 Id, [FromBody] ClientsProject UpdateClientsProject)
-        {
-            if (UpdateClientsProject == null)
-            {
-                return BadRequest(UpdateClientsProject);
-            }
-
-            var updateClientsProject = _CloudDb.ClientsProject.FirstOrDefault(x => x.Project_ID == Id);
-            if (updateClientsProject == null)
-            {
-                return NotFound();
-            }
-
-            updateClientsProject.Project_ID = UpdateClientsProject.Project_ID;
-            updateClientsProject.Client_ID = UpdateClientsProject.Client_ID;
-            updateClientsProject.Business_Style = UpdateClientsProject.Business_Style;
-            updateClientsProject.Client_Subject = UpdateClientsProject.Client_Subject;
-            updateClientsProject.Date = UpdateClientsProject.Date;
-            updateClientsProject.Time = UpdateClientsProject.Time;
-
-
-            _CloudDb.SaveChanges();
-
-
-            return Ok(UpdateClientsProject);
-        }
-
-        [HttpPut("DeleteCloudClientsProject")]
-        public ActionResult<ClientsProject> DeleteCloudClientProject(Int32 Id)
-        {
-
-            var clientProjectDetails = _CloudDb.ClientsProject.FirstOrDefault(x => x.Project_ID == Id);
-            if (clientProjectDetails == null)
-            {
-                return NotFound();
-            }
-            _CloudDb.Remove(clientProjectDetails);
-            _CloudDb.SaveChanges();
-
-
-            return NoContent();
-        }
-
-        // ------------------------------- CLIENTS PROJECT -------------------------------
-
         // ------------------------------- QUOTATION -------------------------------
 
         [HttpGet("GetLocalQuotations")]
-        public List<Quotation> GetAllLocalQuotations()
+        public async Task<ActionResult<List<Quotation>>> GetAllLocalQuotations()
         {
-            return _Localdb.Quotation.ToList();
+            var quotations = await _Localdb.Quotation.ToListAsync();
+            var subjectsForResponse = new Dictionary<int, string>();
+            var hasLegacyPlaintextSubjects = false;
+            foreach (var quotation in quotations)
+            {
+                if (string.IsNullOrWhiteSpace(quotation.Client_Subject))
+                {
+                    continue;
+                }
+
+                if (quotation.Client_Subject.StartsWith("CfDJ8", StringComparison.Ordinal))
+                {
+                    var readableSubject = _encryptionService.TryDecrypt(quotation.Client_Subject);
+                    if (string.IsNullOrWhiteSpace(readableSubject))
+                    {
+                        return StatusCode(
+                            StatusCodes.Status500InternalServerError,
+                            $"The Client Subject for quotation {quotation.Quotation_ID} could not be decrypted. Verify the ASP.NET Data Protection keys.");
+                    }
+                    subjectsForResponse[quotation.Quotation_ID] = readableSubject;
+                }
+                else
+                {
+                    subjectsForResponse[quotation.Quotation_ID] = quotation.Client_Subject;
+                    quotation.Client_Subject = _encryptionService.Encrypt(quotation.Client_Subject);
+                    hasLegacyPlaintextSubjects = true;
+                }
+            }
+
+            if (hasLegacyPlaintextSubjects)
+            {
+                await _Localdb.SaveChangesAsync();
+            }
+
+            foreach (var quotation in quotations)
+            {
+                _Localdb.Entry(quotation).State = EntityState.Detached;
+                if (subjectsForResponse.TryGetValue(quotation.Quotation_ID, out var subject))
+                {
+                    quotation.Client_Subject = subject;
+                }
+            }
+
+            return Ok(quotations);
         }
 
         [HttpGet("GetLocalQuotationsByID")]
@@ -285,7 +85,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var QuotationId = _Localdb.Quotation.FirstOrDefault(x => x.Project_ID == Id);
+            var QuotationId = _Localdb.Quotation.FirstOrDefault(x => x.Client_ID == Id);
             if (QuotationId == null)
             {
                 return NotFound("Client not found.");
@@ -293,14 +93,96 @@ namespace APINIMIRHEMAA.Controllers
             return QuotationId;
         }
 
-        [HttpPost("AddLocalQuotations")]
-        public ActionResult<Quotation> AddLocalQuotations([FromBody] Quotation QuotationDetails)
+        [HttpPost("ReserveLocalClientQuotationSubject")]
+        public async Task<ActionResult> ReserveLocalClientQuotationSubject([FromQuery] int clientId)
         {
+            if (clientId <= 0)
+            {
+                return BadRequest("A valid client ID is required.");
+            }
 
+            var clientExists = await _Localdb.Clients
+                .AsNoTracking()
+                .AnyAsync(record => record.Client_ID == clientId);
+            if (!clientExists)
+            {
+                return BadRequest($"Client {clientId} was not found.");
+            }
+
+            var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
+            var initial = employeeName.FirstOrDefault(char.IsLetter);
+            if (initial == default)
+            {
+                return BadRequest("The signed-in employee name is unavailable, so a Client Subject cannot be generated.");
+            }
+
+            var reservation = await ReserveClientQuotationSubjectAsync(
+                _Localdb,
+                clientId,
+                employeeName,
+                initial);
+
+            return Ok(new
+            {
+                reservationId = reservation.Reservation.Reservation_ID,
+                clientSubject = reservation.ClientSubject
+            });
+        }
+
+        [HttpPost("AddLocalQuotations")]
+        public async Task<ActionResult<Quotation>> AddLocalQuotations([FromBody] Quotation QuotationDetails)
+        {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
+            var clientExists = await _Localdb.Clients
+                .AsNoTracking()
+                .AnyAsync(record => record.Client_ID == QuotationDetails.Client_ID);
+            if (!clientExists)
+            {
+                return BadRequest($"Client {QuotationDetails.Client_ID} was not found.");
+            }
+
+            var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
+            if (!QuotationDetails.Client_SubjectReservation_ID.HasValue)
+            {
+                return BadRequest("Select a client to reserve a Client Subject before saving the quotation.");
+            }
+
+            var now = DateTime.Now;
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            var reservation = await _Localdb.ClientQuotationReservations.FirstOrDefaultAsync(record =>
+                record.Reservation_ID == QuotationDetails.Client_SubjectReservation_ID.Value &&
+                record.Client_ID == QuotationDetails.Client_ID);
+            if (reservation == null)
+            {
+                return BadRequest("The Client Subject reservation is invalid for the selected client.");
+            }
+            if (reservation.IsUsed)
+            {
+                return Conflict("This Client Subject reservation has already been used.");
+            }
+            if (!string.Equals(reservation.ReservedBy, employeeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return Forbid();
+            }
+
+            var clientSubject = ReadClientSubject(reservation.Client_Subject);
+            if (string.IsNullOrWhiteSpace(clientSubject))
+            {
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    "The reserved Client Subject could not be decrypted. Verify the ASP.NET Data Protection keys.");
+            }
+
+            QuotationDetails.Client_Subject = _encryptionService.Encrypt(clientSubject);
+            QuotationDetails.Start_Date = DateOnly.FromDateTime(now);
+            QuotationDetails.Time = TimeOnly.FromDateTime(now);
+            reservation.IsUsed = true;
             _Localdb.Quotation.Add(QuotationDetails);
-            _Localdb.SaveChanges();
+            await _Localdb.SaveChangesAsync();
+            await transaction.CommitAsync();
+            _Localdb.Entry(QuotationDetails).State = EntityState.Detached;
+            QuotationDetails.Client_Subject = clientSubject;
             return Ok(QuotationDetails);
         }
 
@@ -326,7 +208,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPut ("DeleteQuotation")]
         public ActionResult<Quotation> DeleteLocalQuotations(Int32 Id)
         {
-            var quotationDetails = _Localdb.Quotation.FirstOrDefault(x => x.Project_ID == Id);
+            var quotationDetails = _Localdb.Quotation.FirstOrDefault(x => x.Quotation_ID == Id);
             if (quotationDetails == null)
             {
                 return NotFound();
@@ -337,9 +219,52 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpGet("GetCloudQuotations")]
-        public List<Quotation> GetAllCloudQuotations()
+        public async Task<ActionResult<List<Quotation>>> GetAllCloudQuotations()
         {
-            return _CloudDb.Quotation.ToList();
+            var quotations = await _CloudDb.Quotation.ToListAsync();
+            var subjectsForResponse = new Dictionary<int, string>();
+            var hasLegacyPlaintextSubjects = false;
+            foreach (var quotation in quotations)
+            {
+                if (string.IsNullOrWhiteSpace(quotation.Client_Subject))
+                {
+                    continue;
+                }
+
+                if (quotation.Client_Subject.StartsWith("CfDJ8", StringComparison.Ordinal))
+                {
+                    var readableSubject = _encryptionService.TryDecrypt(quotation.Client_Subject);
+                    if (string.IsNullOrWhiteSpace(readableSubject))
+                    {
+                        return StatusCode(
+                            StatusCodes.Status500InternalServerError,
+                            $"The Client Subject for quotation {quotation.Quotation_ID} could not be decrypted. Verify the ASP.NET Data Protection keys.");
+                    }
+                    subjectsForResponse[quotation.Quotation_ID] = readableSubject;
+                }
+                else
+                {
+                    subjectsForResponse[quotation.Quotation_ID] = quotation.Client_Subject;
+                    quotation.Client_Subject = _encryptionService.Encrypt(quotation.Client_Subject);
+                    hasLegacyPlaintextSubjects = true;
+                }
+            }
+
+            if (hasLegacyPlaintextSubjects)
+            {
+                await _CloudDb.SaveChangesAsync();
+            }
+
+            foreach (var quotation in quotations)
+            {
+                _CloudDb.Entry(quotation).State = EntityState.Detached;
+                if (subjectsForResponse.TryGetValue(quotation.Quotation_ID, out var subject))
+                {
+                    quotation.Client_Subject = subject;
+                }
+            }
+
+            return Ok(quotations);
         }
 
         [HttpGet("GetCloudQuotationsByID")]
@@ -349,7 +274,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var QuotationId = _CloudDb.Quotation.FirstOrDefault(x => x.Project_ID == Id);
+            var QuotationId = _CloudDb.Quotation.FirstOrDefault(x => x.Client_ID == Id);
             if (QuotationId == null)
             {
                 return NotFound("Client not found.");
@@ -357,16 +282,162 @@ namespace APINIMIRHEMAA.Controllers
             return QuotationId;
         }
 
+        [HttpPost("ReserveCloudClientQuotationSubject")]
+        public async Task<ActionResult> ReserveCloudClientQuotationSubject([FromQuery] int clientId)
+        {
+            if (clientId <= 0)
+            {
+                return BadRequest("A valid client ID is required.");
+            }
+
+            var clientExists = await _CloudDb.Clients
+                .AsNoTracking()
+                .AnyAsync(record => record.Client_ID == clientId);
+            if (!clientExists)
+            {
+                return BadRequest($"Client {clientId} was not found.");
+            }
+
+            var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
+            var initial = employeeName.FirstOrDefault(char.IsLetter);
+            if (initial == default)
+            {
+                return BadRequest("The signed-in employee name is unavailable, so a Client Subject cannot be generated.");
+            }
+
+            var reservation = await ReserveClientQuotationSubjectAsync(
+                _CloudDb,
+                clientId,
+                employeeName,
+                initial);
+
+            return Ok(new
+            {
+                reservationId = reservation.Reservation.Reservation_ID,
+                clientSubject = reservation.ClientSubject
+            });
+        }
+
         [HttpPost("AddCloudQuotations")]
-        public ActionResult<Quotation> AddCloudQuotations([FromBody] Quotation QuotationDetails)
+        public async Task<ActionResult<Quotation>> AddCloudQuotations([FromBody] Quotation QuotationDetails)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
+
+            var clientExists = await _CloudDb.Clients
+                .AsNoTracking()
+                .AnyAsync(record => record.Client_ID == QuotationDetails.Client_ID);
+            if (!clientExists)
+            {
+                return BadRequest($"Client {QuotationDetails.Client_ID} was not found.");
+            }
+
+            var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
+            if (!QuotationDetails.Client_SubjectReservation_ID.HasValue)
+            {
+                return BadRequest("Select a client to reserve a Client Subject before saving the quotation.");
+            }
+
+            var now = DateTime.Now;
+            await using var transaction = await _CloudDb.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            var reservation = await _CloudDb.ClientQuotationReservations.FirstOrDefaultAsync(record =>
+                record.Reservation_ID == QuotationDetails.Client_SubjectReservation_ID.Value &&
+                record.Client_ID == QuotationDetails.Client_ID);
+            if (reservation == null)
+            {
+                return BadRequest("The Client Subject reservation is invalid for the selected client.");
+            }
+            if (reservation.IsUsed)
+            {
+                return Conflict("This Client Subject reservation has already been used.");
+            }
+            if (!string.Equals(reservation.ReservedBy, employeeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return Forbid();
+            }
+
+            var clientSubject = ReadClientSubject(reservation.Client_Subject);
+            if (string.IsNullOrWhiteSpace(clientSubject))
+            {
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    "The reserved Client Subject could not be decrypted. Verify the ASP.NET Data Protection keys.");
+            }
+
+            QuotationDetails.Client_Subject = _encryptionService.Encrypt(clientSubject);
+            QuotationDetails.Start_Date = DateOnly.FromDateTime(now);
+            QuotationDetails.Time = TimeOnly.FromDateTime(now);
+            reservation.IsUsed = true;
             _CloudDb.Quotation.Add(QuotationDetails);
-            _CloudDb.SaveChanges();
+            await _CloudDb.SaveChangesAsync();
+            await transaction.CommitAsync();
+            _CloudDb.Entry(QuotationDetails).State = EntityState.Detached;
+            QuotationDetails.Client_Subject = clientSubject;
             return Ok(QuotationDetails);
+        }
+
+        private async Task<(ClientQuotationReservation Reservation, string ClientSubject)> ReserveClientQuotationSubjectAsync(
+            DbContext db,
+            int clientId,
+            string employeeName,
+            char initial)
+        {
+            var now = DateTime.Now;
+            var year = now.Year;
+            var month = now.Month;
+
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            var sequence = await db.Set<ClientQuotationSequence>().FirstOrDefaultAsync(record =>
+                record.Client_ID == clientId &&
+                record.SequenceYear == year &&
+                record.SequenceMonth == month);
+            if (sequence == null)
+            {
+                sequence = new ClientQuotationSequence
+                {
+                    Client_ID = clientId,
+                    SequenceYear = year,
+                    SequenceMonth = checked((byte)month),
+                    LastSequence = 1
+                };
+                db.Set<ClientQuotationSequence>().Add(sequence);
+            }
+            else
+            {
+                sequence.LastSequence = checked(sequence.LastSequence + 1);
+            }
+
+            var clientSubject = $"{month:D2}{char.ToUpperInvariant(initial)}{sequence.LastSequence:D3}";
+            var reservation = new ClientQuotationReservation
+            {
+                Reservation_ID = Guid.NewGuid(),
+                Client_ID = clientId,
+                SequenceYear = year,
+                SequenceMonth = checked((byte)month),
+                SequenceNumber = sequence.LastSequence,
+                Client_Subject = _encryptionService.Encrypt(clientSubject),
+                ReservedBy = employeeName,
+                ReservedAt = now,
+                IsUsed = false
+            };
+            db.Set<ClientQuotationReservation>().Add(reservation);
+            await db.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return (reservation, clientSubject);
+        }
+
+        private string ReadClientSubject(string? storedSubject)
+        {
+            if (string.IsNullOrEmpty(storedSubject))
+            {
+                return string.Empty;
+            }
+
+            return storedSubject.StartsWith("CfDJ8", StringComparison.Ordinal)
+                ? _encryptionService.TryDecrypt(storedSubject)
+                : storedSubject;
         }
 
         [HttpPost("UpdateCloudQuotations")]
@@ -376,13 +447,13 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(UpdateQuotation);
             }
-            var updateQuotation = _CloudDb.Quotation.FirstOrDefault(x => x.Project_ID == Id);
+            var updateQuotation = _CloudDb.Quotation.FirstOrDefault(x => x.Quotation_ID == Id);
             if (updateQuotation == null)
             {
                 return NotFound();
             }
             updateQuotation.Quotation_ID = UpdateQuotation.Quotation_ID;
-            updateQuotation.Project_ID = UpdateQuotation.Project_ID;
+            updateQuotation.Client_ID = UpdateQuotation.Client_ID;
             updateQuotation.Sub_Total = UpdateQuotation.Sub_Total;
             updateQuotation.Delivery_Charge = UpdateQuotation.Delivery_Charge;
             updateQuotation.Installation_Charge = UpdateQuotation.Installation_Charge;
@@ -401,7 +472,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPut("DeleteCloudQuotation")]
         public ActionResult<Quotation> DeleteCloudQuotations(Int32 Id)
         {
-            var quotationDetails = _CloudDb.Quotation.FirstOrDefault(x => x.Project_ID == Id);
+            var quotationDetails = _CloudDb.Quotation.FirstOrDefault(x => x.Quotation_ID == Id);
             if (quotationDetails == null)
             {
                 return NotFound();
@@ -771,17 +842,10 @@ namespace APINIMIRHEMAA.Controllers
             var quotations = await _Localdb.Quotation
                 .AsNoTracking()
                 .Where(quotation => quotationIds.Contains(quotation.Quotation_ID))
-                .Select(quotation => new { quotation.Quotation_ID, quotation.Project_ID, quotation.Title })
+                .Select(quotation => new { quotation.Quotation_ID, quotation.Client_ID, quotation.Title })
                 .ToDictionaryAsync(quotation => quotation.Quotation_ID);
 
-            var projectIds = quotations.Values.Select(quotation => quotation.Project_ID).Distinct().ToArray();
-            var projects = await _Localdb.ClientsProject
-                .AsNoTracking()
-                .Where(project => projectIds.Contains(project.Project_ID))
-                .Select(project => new { project.Project_ID, project.Client_ID })
-                .ToDictionaryAsync(project => project.Project_ID);
-
-            var clientIds = projects.Values.Select(project => project.Client_ID).Distinct().ToArray();
+            var clientIds = quotations.Values.Select(quotation => quotation.Client_ID).Distinct().ToArray();
             var clients = await _Localdb.Clients
                 .AsNoTracking()
                 .Where(client => clientIds.Contains(client.Client_ID))
@@ -798,8 +862,7 @@ namespace APINIMIRHEMAA.Controllers
                     && quotations.TryGetValue(conforme.Quotation_ID, out var quotation))
                 {
                     quotationTitle = quotation.Title;
-                    if (projects.TryGetValue(quotation.Project_ID, out var project)
-                        && clients.TryGetValue(project.Client_ID, out var client))
+                    if (clients.TryGetValue(quotation.Client_ID, out var client))
                     {
                         clientName = client.Client_Name;
                         location = client.Company_Address;

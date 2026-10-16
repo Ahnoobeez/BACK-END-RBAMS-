@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Conforme
+    public class Conforme : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int FileID { get; set; }
         public string FileName { get; set; }

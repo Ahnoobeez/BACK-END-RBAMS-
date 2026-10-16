@@ -4,8 +4,9 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace APINIMIRHEMAA.Models
 {
     [Table("Installation_Report")]
-    public sealed class InstallationReport
+    public sealed class InstallationReport : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int InstallationReport_ID { get; set; }
 

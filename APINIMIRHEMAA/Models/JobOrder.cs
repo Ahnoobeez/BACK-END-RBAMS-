@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class JobOrder
+    public class JobOrder : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int JobOrder_ID { get; set; }
         public int Conforme_FileID { get; set; }

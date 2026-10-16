@@ -22,7 +22,6 @@
 
   <ItemGroup>
     <Folder Include="DTO\ClientEntity\" />
-    <Folder Include="DTO\ClientsProject\" />
     <Folder Include="DTO\CollectionReceipt\" />
     <Folder Include="DTO\Conforme\" />
   </ItemGroup>

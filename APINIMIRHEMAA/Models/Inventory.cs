@@ -3,8 +3,9 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Inventory
+    public class Inventory : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int Inventory_ID { get; set; }
         public int? Beginning_Balance { get; set; }

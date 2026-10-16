@@ -1,5 +1,6 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -15,22 +16,38 @@ namespace APINIMIRHEMAA.Controllers
     {
         private LocalDbContext _Localdb;
         private CloudDbContext _Clouddb;
-        public ClientsController(LocalDbContext Localcontext, CloudDbContext Cloudcontext)
+        private readonly EncryptionService _encryptionService;
+        public ClientsController(LocalDbContext Localcontext, CloudDbContext Cloudcontext, EncryptionService encryptionService)
         {
             _Localdb = Localcontext;
             _Clouddb = Cloudcontext;
+            _encryptionService = encryptionService;
         }
 
         private static IQueryable<ClientEntity> ClientsWithTelephoneAsText(DbSet<ClientEntity> clients)
         {
             return clients.FromSqlRaw(
-                "SELECT [Client_ID], COALESCE([Client_Name], N'') AS [Client_Name], COALESCE(CONVERT(nvarchar(16), [Client_Telephone]), N'') AS [Client_Telephone], [Contact_Person], [Client_EmailAddress], COALESCE([TermsAndCondition], N'') AS [TermsAndCondition], [Company_Address], COALESCE([TIN], N'') AS [TIN], [Payment_Terms], COALESCE([Price_Per_Square_Inch], CONVERT(decimal(18,4), 0)) AS [Price_Per_Square_Inch] FROM [dbo].[Clients]");
+                "SELECT [Client_ID], [CreatedBy], COALESCE([Client_Name], N'') AS [Client_Name], COALESCE(CONVERT(nvarchar(16), [Client_Telephone]), N'') AS [Client_Telephone], [Contact_Person], [Business_Style], [Client_EmailAddress], COALESCE([TermsAndCondition], N'') AS [TermsAndCondition], [Company_Address], COALESCE([TIN], N'') AS [TIN], [Payment_Terms], COALESCE([Price_Per_Square_Inch], CONVERT(decimal(18,4), 0)) AS [Price_Per_Square_Inch] FROM [dbo].[Clients]");
+        }
+
+        private ClientEntity PrepareClientForResponse(ClientEntity client)
+        {
+            if (!string.IsNullOrWhiteSpace(client.Business_Style) &&
+                client.Business_Style.StartsWith("CfDJ8", StringComparison.Ordinal))
+            {
+                client.Business_Style = _encryptionService.TryDecrypt(client.Business_Style);
+            }
+
+            return client;
         }
 
         [HttpGet("GetLocalClients")] 
         public List<ClientEntity> GetAllLocalClients()
         {
-            return ClientsWithTelephoneAsText(_Localdb.Clients).ToList();
+            return ClientsWithTelephoneAsText(_Localdb.Clients)
+                .ToList()
+                .Select(PrepareClientForResponse)
+                .ToList();
         }
 
         [HttpGet("GetLocalClientsById")]
@@ -45,7 +62,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound("Client not found.");
             }
-            return ClientDetails;
+            return PrepareClientForResponse(ClientDetails);
         }
 
         [HttpPost ("AddLocalClients")] 
@@ -55,8 +72,12 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var businessStyle = ClientDetails.Business_Style;
+            ClientDetails.Business_Style = _encryptionService.Encrypt(businessStyle);
             _Localdb.Clients.Add(ClientDetails);
             _Localdb.SaveChanges();
+            _Localdb.Entry(ClientDetails).State = EntityState.Detached;
+            ClientDetails.Business_Style = businessStyle;
             return Ok(ClientDetails);
         }
 
@@ -77,6 +98,7 @@ namespace APINIMIRHEMAA.Controllers
             clientDetails.Client_Name = ClientDetails.Client_Name;
             clientDetails.Client_Telephone = ClientDetails.Client_Telephone;
             clientDetails.Contact_Person = ClientDetails.Contact_Person;
+            clientDetails.Business_Style = _encryptionService.Encrypt(ClientDetails.Business_Style);
             clientDetails.Client_EmailAddress = ClientDetails.Client_EmailAddress;
             clientDetails.TermsAndCondition = ClientDetails.TermsAndCondition;
             clientDetails.Company_Address = ClientDetails.Company_Address;
@@ -109,7 +131,10 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetCloudClients")]
         public List<ClientEntity> GetAllCloudClients()
         {
-            return ClientsWithTelephoneAsText(_Clouddb.Clients).ToList();
+            return ClientsWithTelephoneAsText(_Clouddb.Clients)
+                .ToList()
+                .Select(PrepareClientForResponse)
+                .ToList();
         }
 
         [HttpGet("GetCloudClientsById")]
@@ -124,7 +149,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound("Client not found.");
             }
-            return ClientDetails;
+            return PrepareClientForResponse(ClientDetails);
         }
 
         [HttpPost("AddCloudClients")]
@@ -134,8 +159,12 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var businessStyle = ClientDetails.Business_Style;
+            ClientDetails.Business_Style = _encryptionService.Encrypt(businessStyle);
             _Clouddb.Clients.Add(ClientDetails);
             _Clouddb.SaveChanges();
+            _Clouddb.Entry(ClientDetails).State = EntityState.Detached;
+            ClientDetails.Business_Style = businessStyle;
             return Ok(ClientDetails);
         }
 
@@ -156,6 +185,7 @@ namespace APINIMIRHEMAA.Controllers
             clientDetails.Client_Name = ClientDetails.Client_Name;
             clientDetails.Client_Telephone = ClientDetails.Client_Telephone;
             clientDetails.Contact_Person = ClientDetails.Contact_Person;
+            clientDetails.Business_Style = _encryptionService.Encrypt(ClientDetails.Business_Style);
             clientDetails.Client_EmailAddress = ClientDetails.Client_EmailAddress;
             clientDetails.TermsAndCondition = ClientDetails.TermsAndCondition;
             clientDetails.Company_Address = ClientDetails.Company_Address;

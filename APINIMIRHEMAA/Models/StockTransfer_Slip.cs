@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class StockTransfer_Slip
+    public class StockTransfer_Slip : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int Control_Number { get; set; }
         public DateOnly Date { get; set; }

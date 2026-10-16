@@ -5,13 +5,18 @@ namespace APINIMIRHEMAA.Data
 {
     public class CloudDbContext : DbContext
     {
-        public CloudDbContext(DbContextOptions<CloudDbContext> options) : base(options)
-        {
+        private readonly LocalDbContext _localDb;
 
+        public CloudDbContext(
+            DbContextOptions<CloudDbContext> options,
+            LocalDbContext localDb) : base(options)
+        {
+            _localDb = localDb;
         }
         public DbSet<ClientEntity> Clients { get; set; }
-        public DbSet<ClientsProject> ClientsProject { get; set; }
         public DbSet<Quotation> Quotation { get; set; }
+        public DbSet<ClientQuotationSequence> ClientQuotationSequences { get; set; }
+        public DbSet<ClientQuotationReservation> ClientQuotationReservations { get; set; }
         public DbSet<Conforme> Conforme { get; set; }
         public DbSet<JobOrder> JobOrder { get; set; }
         public DbSet<AuditTrail> AuditTrail { get; set; }
@@ -34,5 +39,41 @@ namespace APINIMIRHEMAA.Data
         public DbSet<Purchased_Material> Purchased_Material { get; set; }
         public DbSet<JobOrderItems> JobOrderItems { get; set; }
 
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<ClientQuotationSequence>(entity =>
+            {
+                entity.ToTable("ClientQuotationSequence");
+                entity.HasKey(sequence => new { sequence.Client_ID, sequence.SequenceYear, sequence.SequenceMonth });
+            });
+            modelBuilder.Entity<ClientQuotationReservation>()
+                .ToTable("ClientQuotationReservation");
+        }
+
+        public override int SaveChanges(bool acceptAllChangesOnSuccess)
+        {
+            SetCreatedByRecords();
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+
+        public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        {
+            SetCreatedByRecords();
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+
+        private void SetCreatedByRecords()
+        {
+            var creator = _localDb.GetCurrentEmployeeName();
+
+            foreach (var entry in ChangeTracker.Entries()
+                         .Where(entry => entry.State == EntityState.Added))
+            {
+                if (entry.Entity is ICreatedByRecord record)
+                {
+                    record.CreatedBy = creator;
+                }
+            }
+        }
     }
 }

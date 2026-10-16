@@ -3,11 +3,15 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Quotation
+    public class Quotation : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int Quotation_ID { get; set; }
-        public int Project_ID { get; set; }
+        public int Client_ID { get; set; }
+        public string? Client_Subject { get; set; }
+        [NotMapped]
+        public Guid? Client_SubjectReservation_ID { get; set; }
         public string? Title { get; set; }
         [Column(TypeName = "decimal(18,2)")]
         public decimal Sub_Total { get; set; }
@@ -24,7 +28,6 @@ namespace APINIMIRHEMAA.Models
         public string? Terms_Condition { get; set; }
         public DateOnly Start_Date { get; set; }
         public TimeOnly Time { get; set; }
-        public int? User_ID { get; set; }
 
     }
 }

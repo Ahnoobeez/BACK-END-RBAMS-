@@ -28,27 +28,18 @@ namespace APINIMIRHEMAA.Controllers
                 .AsNoTracking()
                 .OrderByDescending(quotation => quotation.Quotation_ID)
                 .ToListAsync();
-            var projectIds = quotations.Select(quotation => quotation.Project_ID).Distinct().ToList();
-            var projects = projectIds.Count == 0
-                ? new List<Models.ClientsProject>()
-                : await _localDb.ClientsProject
-                    .AsNoTracking()
-                    .Where(project => projectIds.Contains(project.Project_ID))
-                    .ToListAsync();
-            var clientIds = projects.Select(project => project.Client_ID).Distinct().ToList();
+            var clientIds = quotations.Select(quotation => quotation.Client_ID).Distinct().ToList();
             var clients = clientIds.Count == 0
                 ? new List<Models.ClientEntity>()
                 : await _localDb.Clients
                     .AsNoTracking()
                     .Where(client => clientIds.Contains(client.Client_ID))
                     .ToListAsync();
-            var projectsById = projects.ToDictionary(project => project.Project_ID);
             var clientsById = clients.ToDictionary(client => client.Client_ID);
 
             var options = quotations.Select(quotation =>
             {
-                projectsById.TryGetValue(quotation.Project_ID, out var project);
-                clientsById.TryGetValue(project?.Client_ID ?? 0, out var client);
+                clientsById.TryGetValue(quotation.Client_ID, out var client);
                 return new ProjectViewerQuotationOptionDto
                 {
                     QuotationId = quotation.Quotation_ID,
@@ -76,14 +67,9 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound("The requested quotation was not found.");
             }
 
-            var project = await _localDb.ClientsProject
+            var client = await _localDb.Clients
                 .AsNoTracking()
-                .FirstOrDefaultAsync(record => record.Project_ID == quotation.Project_ID);
-            var client = project == null
-                ? null
-                : await _localDb.Clients
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(record => record.Client_ID == project.Client_ID);
+                .FirstOrDefaultAsync(record => record.Client_ID == quotation.Client_ID);
 
             var stores = await _localDb.Quotation_Store
                 .AsNoTracking()
@@ -177,16 +163,21 @@ namespace APINIMIRHEMAA.Controllers
                     .Where(record => jobOrderIds.Contains(record.JobOrder_ID))
                     .ToListAsync();
 
-            if (project != null)
+            if (!string.IsNullOrWhiteSpace(client?.Business_Style) &&
+                client.Business_Style.StartsWith("CfDJ8", StringComparison.Ordinal))
             {
-                project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
-                project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
+                client.Business_Style = _encryptionService.TryDecrypt(client.Business_Style);
+            }
+
+            if (!string.IsNullOrEmpty(quotation.Client_Subject) &&
+                quotation.Client_Subject.StartsWith("CfDJ8", StringComparison.Ordinal))
+            {
+                quotation.Client_Subject = _encryptionService.TryDecrypt(quotation.Client_Subject);
             }
 
             return Ok(new ProjectViewerQuotationDetailsDto
             {
                 Quotation = quotation,
-                Project = project,
                 Client = client,
                 Conformes = conformes,
                 PurchaseOrders = purchaseOrders,

@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Quotation_Store
+    public class Quotation_Store : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int QS_ID { get; set; }
         public string? Store { get; set; }

@@ -3,8 +3,9 @@
 namespace APINIMIRHEMAA.Models
 {
     
-    public class CollectionReceipt
+    public class CollectionReceipt : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int CollectionReceipt_ID { get; set; }
         public string FileName { get; set; }

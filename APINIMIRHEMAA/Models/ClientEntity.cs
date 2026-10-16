@@ -3,8 +3,9 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
-    public class ClientEntity
+    public class ClientEntity : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int Client_ID { get; set; }
         [Required]
@@ -15,6 +16,8 @@ namespace APINIMIRHEMAA.Models
         public string Client_Telephone { get; set; }
         [MaxLength(200)]
         public string? Contact_Person { get; set; }
+        [Required]
+        public string? Business_Style { get; set; }
         [EmailAddress]
         [MaxLength(254)]
         public string? Client_EmailAddress { get; set; }

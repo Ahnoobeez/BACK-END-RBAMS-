@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Installation_Schedule
+    public class Installation_Schedule : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int Installation_ID { get; set; }
         public TimeOnly Time { get; set; }

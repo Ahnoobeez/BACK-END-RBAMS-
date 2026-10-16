@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class DeliveryReceipt
+    public class DeliveryReceipt : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int Delivery_ID { get; set; }
         public int? JobOrderID { get; set; }

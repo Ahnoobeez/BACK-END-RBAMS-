@@ -3,8 +3,9 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Quotation_Items
+    public class Quotation_Items : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int QI_ID { get; set; }
         public string? Requirements { get; set; }

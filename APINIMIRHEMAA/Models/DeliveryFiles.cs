@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class DeliveryFiles
+    public class DeliveryFiles : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int File_ID { get; set; }
         public int Delivery_ID { get; set; }

@@ -755,20 +755,6 @@ namespace APINIMIRHEMAA.Controllers
 
         // --------------------------- MATERIALS REQUESITION SLIP ---------------------------
 
-        [HttpGet("GetLocalClientsProject")]
-        public List<ClientsProject> GetAllLocalClientsProject()
-        {
-            var projects = _Localdb.ClientsProject.ToList();
-
-            foreach (var project in projects)
-            {
-                project.Business_Style = _encryptionService.Decrypt(project.Business_Style);
-                project.Client_Subject = _encryptionService.Decrypt(project.Client_Subject);
-            }
-
-            return projects;
-        }
-
         [HttpGet("GetLocalQuotations")]
         public List<Quotation> GetAllLocalQuotations()
         {

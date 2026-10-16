@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class MaterialRequesition_Slip
+    public class MaterialRequesition_Slip : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int MR_ID { get; set; }
         public int Material_ID { get; set; }

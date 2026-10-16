@@ -53,7 +53,7 @@ namespace APINIMIRHEMAA.Controllers
 
             return Ok(new
             {
-                projectRequestCount = _localDb.ClientsProject.AsNoTracking().Count(),
+                clientCount = _localDb.Clients.AsNoTracking().Count(),
                 quotationCount = _localDb.Quotation.AsNoTracking().Count(),
                 jobOrderCount = jobOrders.Count,
                 jobOrderStatuses = new

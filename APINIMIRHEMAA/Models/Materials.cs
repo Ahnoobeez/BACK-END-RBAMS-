@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Materials
+    public class Materials : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int Material_ID { get; set; }
         public string Code_Name { get; set; }

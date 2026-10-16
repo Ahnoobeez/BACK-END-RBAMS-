@@ -1,5 +1,4 @@
 using APINIMIRHEMAA.Models;
-using ClientsProjectModel = APINIMIRHEMAA.Models.ClientsProject;
 using InstallationReportModel = APINIMIRHEMAA.Models.InstallationReport;
 
 namespace APINIMIRHEMAA.DTO.ProjectViewer
@@ -14,7 +13,6 @@ namespace APINIMIRHEMAA.DTO.ProjectViewer
     public sealed class ProjectViewerQuotationDetailsDto
     {
         public Quotation? Quotation { get; init; }
-        public ClientsProjectModel? Project { get; init; }
         public ClientEntity? Client { get; init; }
         public List<Conforme> Conformes { get; init; } = new();
         public List<PurchaseOrder> PurchaseOrders { get; init; } = new();

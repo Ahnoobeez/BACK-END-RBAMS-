@@ -2,8 +2,9 @@
 
 namespace APINIMIRHEMAA.Models
 {
-    public class Purchased_Material
+    public class Purchased_Material : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
         [Key]
         public int Purchased_ID { get; set; }
         public DateOnly Date_Received_Item { get; set; }
