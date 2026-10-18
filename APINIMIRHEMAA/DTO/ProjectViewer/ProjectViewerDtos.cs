@@ -51,5 +51,6 @@ namespace APINIMIRHEMAA.DTO.ProjectViewer
         public decimal? PricePerSquareInch { get; init; }
         public decimal? UnitPrice { get; init; }
         public decimal? TotalAmount { get; init; }
+        public List<int> MaterialIds { get; init; } = new();
     }
 }

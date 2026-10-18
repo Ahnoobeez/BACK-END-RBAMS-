@@ -80,6 +80,7 @@ namespace APINIMIRHEMAA.Controllers
                 ? new List<Models.Quotation_Items>()
                 : await _localDb.Quotation_Items
                     .AsNoTracking()
+                    .Include(item => item.Materials)
                     .Where(item => storeIds.Contains(item.QS_ID))
                     .ToListAsync();
             var storesById = stores.ToDictionary(store => store.QS_ID);
@@ -97,7 +98,8 @@ namespace APINIMIRHEMAA.Controllers
                     Quantity = item.Quantity,
                     PricePerSquareInch = item.Price_Per_Square_Inch,
                     UnitPrice = item.Unit_Price,
-                    TotalAmount = item.Total_Amount
+                    TotalAmount = item.Total_Amount,
+                    MaterialIds = item.Materials.Select(material => material.Material_ID).ToList()
                 };
             }).ToList();
 

@@ -95,6 +95,29 @@ namespace APINIMIRHEMAA.Controllers
             return QuotationId;
         }
 
+        [HttpGet("PreviewLocalClientQuotationSubject")]
+        public async Task<ActionResult> PreviewLocalClientQuotationSubject([FromQuery] int clientId)
+        {
+            if (clientId <= 0)
+            {
+                return BadRequest("A valid client ID is required.");
+            }
+            if (!await _Localdb.Clients.AsNoTracking().AnyAsync(record => record.Client_ID == clientId))
+            {
+                return BadRequest($"Client {clientId} was not found.");
+            }
+
+            var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
+            var initial = employeeName.FirstOrDefault(char.IsLetter);
+            if (initial == default)
+            {
+                return BadRequest("The signed-in employee name is unavailable, so a Client Subject cannot be generated.");
+            }
+
+            var clientSubject = await PreviewClientQuotationSubjectAsync(_Localdb, clientId, initial);
+            return Ok(new { clientSubject });
+        }
+
         [HttpPost("ReserveLocalClientQuotationSubject")]
         public async Task<ActionResult> ReserveLocalClientQuotationSubject([FromQuery] int clientId)
         {
@@ -145,30 +168,46 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
-            if (!QuotationDetails.Client_SubjectReservation_ID.HasValue)
-            {
-                return BadRequest("Select a client to reserve a Client Subject before saving the quotation.");
-            }
-
             var now = DateTime.Now;
             await using var transaction = await _Localdb.Database.BeginTransactionAsync(IsolationLevel.Serializable);
-            var reservation = await _Localdb.ClientQuotationReservations.FirstOrDefaultAsync(record =>
-                record.Reservation_ID == QuotationDetails.Client_SubjectReservation_ID.Value &&
-                record.Client_ID == QuotationDetails.Client_ID);
-            if (reservation == null)
+            ClientQuotationReservation reservation;
+            string clientSubject;
+            if (QuotationDetails.Client_SubjectReservation_ID.HasValue)
             {
-                return BadRequest("The Client Subject reservation is invalid for the selected client.");
+                reservation = await _Localdb.ClientQuotationReservations.FirstOrDefaultAsync(record =>
+                    record.Reservation_ID == QuotationDetails.Client_SubjectReservation_ID.Value &&
+                    record.Client_ID == QuotationDetails.Client_ID);
+                if (reservation == null)
+                {
+                    return BadRequest("The Client Subject reservation is invalid for the selected client.");
+                }
+                if (reservation.IsUsed)
+                {
+                    return Conflict("This Client Subject reservation has already been used.");
+                }
+                if (!string.Equals(reservation.ReservedBy, employeeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Forbid();
+                }
+                clientSubject = ReadClientSubject(reservation.Client_Subject);
             }
-            if (reservation.IsUsed)
+            else
             {
-                return Conflict("This Client Subject reservation has already been used.");
-            }
-            if (!string.Equals(reservation.ReservedBy, employeeName, StringComparison.OrdinalIgnoreCase))
-            {
-                return Forbid();
-            }
+                var initial = employeeName.FirstOrDefault(char.IsLetter);
+                if (initial == default)
+                {
+                    return BadRequest("The signed-in employee name is unavailable, so a Client Subject cannot be generated.");
+                }
 
-            var clientSubject = ReadClientSubject(reservation.Client_Subject);
+                var generatedSubject = await ReserveClientQuotationSubjectWithinTransactionAsync(
+                    _Localdb,
+                    QuotationDetails.Client_ID,
+                    employeeName,
+                    initial);
+                reservation = generatedSubject.Reservation;
+                clientSubject = generatedSubject.ClientSubject;
+                QuotationDetails.Client_SubjectReservation_ID = reservation.Reservation_ID;
+            }
             if (string.IsNullOrWhiteSpace(clientSubject))
             {
                 return StatusCode(
@@ -284,6 +323,29 @@ namespace APINIMIRHEMAA.Controllers
             return QuotationId;
         }
 
+        [HttpGet("PreviewCloudClientQuotationSubject")]
+        public async Task<ActionResult> PreviewCloudClientQuotationSubject([FromQuery] int clientId)
+        {
+            if (clientId <= 0)
+            {
+                return BadRequest("A valid client ID is required.");
+            }
+            if (!await _CloudDb.Clients.AsNoTracking().AnyAsync(record => record.Client_ID == clientId))
+            {
+                return BadRequest($"Client {clientId} was not found.");
+            }
+
+            var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
+            var initial = employeeName.FirstOrDefault(char.IsLetter);
+            if (initial == default)
+            {
+                return BadRequest("The signed-in employee name is unavailable, so a Client Subject cannot be generated.");
+            }
+
+            var clientSubject = await PreviewClientQuotationSubjectAsync(_CloudDb, clientId, initial);
+            return Ok(new { clientSubject });
+        }
+
         [HttpPost("ReserveCloudClientQuotationSubject")]
         public async Task<ActionResult> ReserveCloudClientQuotationSubject([FromQuery] int clientId)
         {
@@ -337,30 +399,46 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
-            if (!QuotationDetails.Client_SubjectReservation_ID.HasValue)
-            {
-                return BadRequest("Select a client to reserve a Client Subject before saving the quotation.");
-            }
-
             var now = DateTime.Now;
             await using var transaction = await _CloudDb.Database.BeginTransactionAsync(IsolationLevel.Serializable);
-            var reservation = await _CloudDb.ClientQuotationReservations.FirstOrDefaultAsync(record =>
-                record.Reservation_ID == QuotationDetails.Client_SubjectReservation_ID.Value &&
-                record.Client_ID == QuotationDetails.Client_ID);
-            if (reservation == null)
+            ClientQuotationReservation reservation;
+            string clientSubject;
+            if (QuotationDetails.Client_SubjectReservation_ID.HasValue)
             {
-                return BadRequest("The Client Subject reservation is invalid for the selected client.");
+                reservation = await _CloudDb.ClientQuotationReservations.FirstOrDefaultAsync(record =>
+                    record.Reservation_ID == QuotationDetails.Client_SubjectReservation_ID.Value &&
+                    record.Client_ID == QuotationDetails.Client_ID);
+                if (reservation == null)
+                {
+                    return BadRequest("The Client Subject reservation is invalid for the selected client.");
+                }
+                if (reservation.IsUsed)
+                {
+                    return Conflict("This Client Subject reservation has already been used.");
+                }
+                if (!string.Equals(reservation.ReservedBy, employeeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Forbid();
+                }
+                clientSubject = ReadClientSubject(reservation.Client_Subject);
             }
-            if (reservation.IsUsed)
+            else
             {
-                return Conflict("This Client Subject reservation has already been used.");
-            }
-            if (!string.Equals(reservation.ReservedBy, employeeName, StringComparison.OrdinalIgnoreCase))
-            {
-                return Forbid();
-            }
+                var initial = employeeName.FirstOrDefault(char.IsLetter);
+                if (initial == default)
+                {
+                    return BadRequest("The signed-in employee name is unavailable, so a Client Subject cannot be generated.");
+                }
 
-            var clientSubject = ReadClientSubject(reservation.Client_Subject);
+                var generatedSubject = await ReserveClientQuotationSubjectWithinTransactionAsync(
+                    _CloudDb,
+                    QuotationDetails.Client_ID,
+                    employeeName,
+                    initial);
+                reservation = generatedSubject.Reservation;
+                clientSubject = generatedSubject.ClientSubject;
+                QuotationDetails.Client_SubjectReservation_ID = reservation.Reservation_ID;
+            }
             if (string.IsNullOrWhiteSpace(clientSubject))
             {
                 return StatusCode(
@@ -386,11 +464,36 @@ namespace APINIMIRHEMAA.Controllers
             string employeeName,
             char initial)
         {
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            var result = await ReserveClientQuotationSubjectWithinTransactionAsync(db, clientId, employeeName, initial);
+            await transaction.CommitAsync();
+            return result;
+        }
+
+        private async Task<string> PreviewClientQuotationSubjectAsync(DbContext db, int clientId, char initial)
+        {
+            var now = DateTime.Now;
+            var lastSequence = await db.Set<ClientQuotationSequence>()
+                .AsNoTracking()
+                .Where(record =>
+                    record.Client_ID == clientId &&
+                    record.SequenceYear == now.Year &&
+                    record.SequenceMonth == now.Month)
+                .Select(record => (int?)record.LastSequence)
+                .FirstOrDefaultAsync();
+            var nextSequence = checked((lastSequence ?? 0) + 1);
+            return $"{now.Month:D2}{char.ToUpperInvariant(initial)}{nextSequence:D3}";
+        }
+
+        private async Task<(ClientQuotationReservation Reservation, string ClientSubject)> ReserveClientQuotationSubjectWithinTransactionAsync(
+            DbContext db,
+            int clientId,
+            string employeeName,
+            char initial)
+        {
             var now = DateTime.Now;
             var year = now.Year;
             var month = now.Month;
-
-            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             var sequence = await db.Set<ClientQuotationSequence>().FirstOrDefaultAsync(record =>
                 record.Client_ID == clientId &&
                 record.SequenceYear == year &&
@@ -426,7 +529,6 @@ namespace APINIMIRHEMAA.Controllers
             };
             db.Set<ClientQuotationReservation>().Add(reservation);
             await db.SaveChangesAsync();
-            await transaction.CommitAsync();
             return (reservation, clientSubject);
         }
 
