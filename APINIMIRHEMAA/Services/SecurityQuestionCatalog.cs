@@ -7,6 +7,8 @@ namespace APINIMIRHEMAA.Services
 
     public static class SecurityQuestionCatalog
     {
+        public const int RequiredEnrollmentAnswerCount = 10;
+
         public static IReadOnlyList<SecurityQuestion> All { get; } = new[]
         {
             new SecurityQuestion(1, "What is your mother's maiden name?"),
@@ -41,9 +43,22 @@ namespace APINIMIRHEMAA.Services
             new SecurityQuestion(30, "What was the name of the first organization you joined?")
         };
 
-        public static IReadOnlyList<SecurityQuestion> SelectRandomThree()
+        public static bool HasCompleteAnswerSet(int answerCount) =>
+            answerCount == RequiredEnrollmentAnswerCount;
+
+        public static bool HasRecoverableAnswerSet(int answerCount) =>
+            HasCompleteAnswerSet(answerCount) || answerCount == All.Count;
+
+        public static IReadOnlyList<SecurityQuestion> SelectRandomThree(IEnumerable<int>? questionIds = null)
         {
-            var ids = Enumerable.Range(1, All.Count).ToArray();
+            var ids = (questionIds ?? Enumerable.Range(1, All.Count))
+                .Distinct()
+                .ToArray();
+            if (ids.Length < 3 || ids.Any(id => id < 1 || id > All.Count))
+            {
+                throw new ArgumentException("At least three valid security question IDs are required.", nameof(questionIds));
+            }
+
             for (var index = ids.Length - 1; index > 0; index--)
             {
                 var swapIndex = RandomNumberGenerator.GetInt32(index + 1);

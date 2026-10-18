@@ -32,6 +32,11 @@
         public int TargetUserId { get; set; }
         public string AdminPassword { get; set; } = "";
     }
+    public class DeleteUsersDto
+    {
+        public List<int>? TargetUserIds { get; set; }
+        public string AdminPassword { get; set; } = "";
+    }
     public class ChangePasswordDto
     {
         public string CurrentPassword { get; set; } = "";

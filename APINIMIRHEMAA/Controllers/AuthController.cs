@@ -60,12 +60,13 @@ namespace APINIMIRHEMAA.Controllers
 
             var answerCount = await _context.UserSecurityAnswers
                 .CountAsync(answer => answer.User_ID == user.User_ID);
-            if (answerCount != SecurityQuestionCatalog.All.Count)
+            if (!SecurityQuestionCatalog.HasCompleteAnswerSet(answerCount))
             {
                 return Ok(new
                 {
                     securityQuestionsSetupRequired = true,
                     setupToken = CreateSecuritySetupToken(user.User_ID),
+                    requiredQuestionCount = SecurityQuestionCatalog.RequiredEnrollmentAnswerCount,
                     questions = SecurityQuestionCatalog.All
                 });
             }
@@ -81,15 +82,15 @@ namespace APINIMIRHEMAA.Controllers
                 return Unauthorized(new { message = "The security setup session expired. Sign in again." });
             }
             if (request.Answers == null ||
-                request.Answers.Count != SecurityQuestionCatalog.All.Count ||
+                request.Answers.Count != SecurityQuestionCatalog.RequiredEnrollmentAnswerCount ||
                 request.Answers.Any(answer =>
                     answer.QuestionId < 1 ||
                     answer.QuestionId > SecurityQuestionCatalog.All.Count ||
                     string.IsNullOrWhiteSpace(answer.Answer) ||
                     Encoding.UTF8.GetByteCount(SecurityQuestionCatalog.NormalizeAnswer(answer.Answer)) > 72) ||
-                request.Answers.Select(answer => answer.QuestionId).Distinct().Count() != SecurityQuestionCatalog.All.Count)
+                request.Answers.Select(answer => answer.QuestionId).Distinct().Count() != SecurityQuestionCatalog.RequiredEnrollmentAnswerCount)
             {
-                return BadRequest(new { message = "Answer all 30 security questions. Answers must be 72 UTF-8 bytes or less." });
+                return BadRequest(new { message = "Choose and answer 10 different security questions. Answers must be 72 UTF-8 bytes or less." });
             }
 
             var newAnswers = request.Answers.Select(answer => new UserSecurityAnswer
@@ -108,7 +109,7 @@ namespace APINIMIRHEMAA.Controllers
 
             var existingAnswerCount = await _context.UserSecurityAnswers
                 .CountAsync(answer => answer.User_ID == userId);
-            if (existingAnswerCount == SecurityQuestionCatalog.All.Count)
+            if (SecurityQuestionCatalog.HasCompleteAnswerSet(existingAnswerCount))
             {
                 return Conflict(new { message = "Security questions have already been set up. Sign in again." });
             }
@@ -151,17 +152,38 @@ namespace APINIMIRHEMAA.Controllers
                     account.Username == username &&
                     account.Email == email &&
                     account.IsActive);
+            var questions = SecurityQuestionCatalog.SelectRandomThree();
             if (user != null)
             {
-                var answerCount = await _context.UserSecurityAnswers
-                    .CountAsync(answer => answer.User_ID == user.User_ID);
-                if (answerCount != SecurityQuestionCatalog.All.Count)
+                var savedQuestionIds = await _context.UserSecurityAnswers
+                    .Where(answer => answer.User_ID == user.User_ID)
+                    .Select(answer => answer.Question_ID)
+                    .ToListAsync();
+                if (SecurityQuestionCatalog.HasRecoverableAnswerSet(savedQuestionIds.Count))
+                {
+                    questions = SecurityQuestionCatalog.SelectRandomThree(savedQuestionIds);
+                }
+                else
                 {
                     user = null;
                 }
             }
 
-            var questions = SecurityQuestionCatalog.SelectRandomThree();
+            string? employeeName = null;
+            if (user != null)
+            {
+                var employee = await _context.Employee
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.Employee_Id == user.Employee_ID);
+                employeeName = employee == null
+                    ? user.Username
+                    : $"{employee.FirstName} {employee.LastName}".Trim();
+                if (string.IsNullOrWhiteSpace(employeeName))
+                {
+                    employeeName = user.Username;
+                }
+            }
+
             var challenge = new PasswordRecoveryChallenge
             {
                 Challenge_ID = Guid.NewGuid(),
@@ -179,7 +201,8 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(new
             {
                 challengeId = challenge.Challenge_ID,
-                questions
+                questions,
+                employeeName
             });
         }
 

@@ -1,5 +1,6 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
+using APINIMIRHEMAA.DTO.JobOrders;
 using APINIMIRHEMAA.Models;
 using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -29,7 +30,31 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalJobOrder")]
         public List<JobOrder> GetAllJobOrder()
         {
-            return _Localdb.JobOrder.ToList();
+            return _Localdb.JobOrder
+                .AsNoTracking()
+                .Include(jobOrder => jobOrder.Comments)
+                .ToList();
+        }
+
+        [HttpGet("GetLocalJobOrderItemsByJobOrderID")]
+        public async Task<ActionResult<List<JobOrderItems>>> GetLocalJobOrderItemsByJobOrderID(int jobOrderId)
+        {
+            if (jobOrderId <= 0)
+            {
+                return BadRequest("Invalid Job Order ID.");
+            }
+
+            if (!await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == jobOrderId))
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var items = await _Localdb.JobOrderItems
+                .AsNoTracking()
+                .Where(item => item.JobOrder_ID == jobOrderId)
+                .OrderBy(item => item.JobOrderItems_ID)
+                .ToListAsync();
+            return Ok(items);
         }
 
         [HttpGet("GetLocalJobOrderByID")]
@@ -39,12 +64,52 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var jobOrder = _Localdb.JobOrder.FirstOrDefault(x => x.JobOrder_ID == id);
+            var jobOrder = _Localdb.JobOrder
+                .Include(x => x.Comments)
+                .FirstOrDefault(x => x.JobOrder_ID == id);
             if (jobOrder == null)
             {
                 return NotFound();
             }
             return Ok(jobOrder);
+        }
+
+        [HttpPost("AddLocalJobOrderComment")]
+        public async Task<ActionResult<JobOrderComment>> AddLocalJobOrderComment(
+            [FromBody] AddJobOrderCommentRequest request)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var commentText = request.Comment.Trim();
+            if (string.IsNullOrWhiteSpace(commentText))
+            {
+                return BadRequest("A comment is required.");
+            }
+
+            if (!await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == request.JobOrder_ID))
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
+            if (string.IsNullOrWhiteSpace(employeeName))
+            {
+                return BadRequest("The signed-in employee name is unavailable.");
+            }
+
+            var comment = new JobOrderComment
+            {
+                JobOrder_ID = request.JobOrder_ID,
+                Employee_Name = employeeName,
+                Comment = commentText,
+                CreatedAt = DateTime.UtcNow
+            };
+            _Localdb.JobOrderComments.Add(comment);
+            await _Localdb.SaveChangesAsync();
+            return Ok(comment);
         }
 
         [HttpPost("AddLocalJobOrder")]
@@ -54,6 +119,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            jobOrder.Comments = new List<JobOrderComment>();
             _Localdb.Add(jobOrder);
             _Localdb.SaveChanges();
             return Ok(jobOrder);
@@ -75,7 +141,6 @@ namespace APINIMIRHEMAA.Controllers
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
-            updateJobOrder.Comment = _jobOrder.Comment;
 
 
             _Localdb.SaveChanges();
@@ -143,8 +208,6 @@ namespace APINIMIRHEMAA.Controllers
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
-            updateJobOrder.Comment = _jobOrder.Comment;
-
 
             _CloudDb.SaveChanges();
             return Ok(updateJobOrder);
@@ -378,25 +441,38 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPut("DeleteLocalInstallationSchedule")]
-        public IActionResult DeleteLocalInstallationSchedule(int id)
+        public async Task<IActionResult> DeleteLocalInstallationSchedule(int id)
         {
             if (id <= 0)
             {
                 return BadRequest("A valid schedule row is required.");
             }
 
-            var installationSchedule = _Localdb.Installation_Schedule.FirstOrDefault(schedule => schedule.Installation_ID == id);
-            if (installationSchedule == null)
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync();
+            await _Localdb.Installation_Schedule_Employee
+                .Where(assignment => assignment.Installation_ID == id)
+                .ExecuteDeleteAsync();
+
+            var deletedSchedules = await _Localdb.Installation_Schedule
+                .Where(schedule => schedule.Installation_ID == id)
+                .ExecuteDeleteAsync();
+            if (deletedSchedules == 0)
             {
-                return NotFound();
+                await transaction.CommitAsync();
+                return NoContent();
             }
 
-            var assignments = _Localdb.Installation_Schedule_Employee
-                .Where(assignment => assignment.Installation_ID == id)
-                .ToList();
-            _Localdb.Installation_Schedule_Employee.RemoveRange(assignments);
-            _Localdb.Installation_Schedule.Remove(installationSchedule);
-            _Localdb.SaveChanges();
+            var now = DateTime.Now;
+            _Localdb.AuditTrail.Add(new AuditTrail
+            {
+                Name = _Localdb.GetCurrentEmployeeName(),
+                Date = DateOnly.FromDateTime(now),
+                Time = TimeOnly.FromDateTime(now),
+                Action = $"Installation_Schedule# {id} has been deleted",
+                Department = "JobOrder"
+            });
+            await _Localdb.SaveChangesAsync();
+            await transaction.CommitAsync();
             return NoContent();
         }
 

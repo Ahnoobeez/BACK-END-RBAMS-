@@ -48,6 +48,8 @@ namespace APINIMIRHEMAA.Data
             });
             modelBuilder.Entity<ClientQuotationReservation>()
                 .ToTable("ClientQuotationReservation");
+            modelBuilder.Entity<JobOrder>()
+                .Ignore(jobOrder => jobOrder.Comments);
         }
 
         public override int SaveChanges(bool acceptAllChangesOnSuccess)

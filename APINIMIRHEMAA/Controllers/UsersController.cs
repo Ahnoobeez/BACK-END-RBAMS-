@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -79,19 +80,72 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPut("DeleteLocalUsers")]
-        public ActionResult<Users> DeleteLocalUsers(Int32 Id)
+        public async Task<IActionResult> DeleteLocalUsers([FromBody] DeleteUsersDto dto)
         {
-
-            var users = _Localdb.Users.FirstOrDefault(x => x.User_ID == Id);
-            if (users == null)
+            var adminIdValue = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!int.TryParse(adminIdValue, out var adminId))
             {
-                return NotFound();
+                return Unauthorized(new { message = "Your session is invalid. Sign in again." });
             }
-            _Localdb.Remove(users);
-            _Localdb.SaveChanges();
+            if (dto.TargetUserIds == null ||
+                dto.TargetUserIds.Count == 0 ||
+                dto.TargetUserIds.Any(id => id <= 0) ||
+                dto.TargetUserIds.Distinct().Count() != dto.TargetUserIds.Count)
+            {
+                return BadRequest(new { message = "Select one or more valid user accounts to delete." });
+            }
+            if (string.IsNullOrWhiteSpace(dto.AdminPassword))
+            {
+                return BadRequest(new { message = "Enter your current password to delete accounts." });
+            }
 
+            var admin = await _Localdb.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(user => user.User_ID == adminId);
+            if (admin == null || !_passwords.Verify(admin.PasswordHash, dto.AdminPassword))
+            {
+                return StatusCode(403, new { message = "Your password was not accepted." });
+            }
 
-            return NoContent();
+            if (dto.TargetUserIds.Contains(adminId))
+            {
+                return BadRequest(new { message = "You cannot delete the account you are currently signed in with." });
+            }
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            var targetIds = dto.TargetUserIds.ToArray();
+            var users = await _Localdb.Users
+                .Where(user => targetIds.Contains(user.User_ID))
+                .ToListAsync();
+            if (users.Count != targetIds.Length)
+            {
+                return NotFound(new { message = "One or more selected accounts could not be found." });
+            }
+
+            var protectedRoleIds = await _Localdb.Roles
+                .Where(role => role.Role_Name == "Admin" || role.Role_Name == "Super Admin")
+                .Select(role => role.Role_ID)
+                .ToListAsync();
+            if (!protectedRoleIds.Contains(admin.Role_ID))
+            {
+                protectedRoleIds.Add(admin.Role_ID);
+            }
+            if (users.Any(user => user.IsActive && protectedRoleIds.Contains(user.Role_ID)))
+            {
+                var remainingActiveAdmins = await _Localdb.Users.CountAsync(user =>
+                    user.IsActive &&
+                    protectedRoleIds.Contains(user.Role_ID) &&
+                    !targetIds.Contains(user.User_ID));
+                if (remainingActiveAdmins == 0)
+                {
+                    return Conflict(new { message = "At least one active administrator account must remain." });
+                }
+            }
+
+            _Localdb.Users.RemoveRange(users);
+            await _Localdb.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return Ok(new { deletedCount = users.Count });
         }
 
         [HttpPost("ResetLocalUserPassword")]

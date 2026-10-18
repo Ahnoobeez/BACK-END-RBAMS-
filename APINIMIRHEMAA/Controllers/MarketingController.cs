@@ -1,6 +1,8 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.InstallationReport;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
+using APINIMIRHEMAA.DTO.JobOrders;
+using APINIMIRHEMAA.DTO.QuotationItems;
 using APINIMIRHEMAA.Models;
 using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -490,7 +492,9 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalQuotationItems")]
         public List<Quotation_Items> GetAllLocalQuotationsItems()
         {
-            return _Localdb.Quotation_Items.ToList();
+            return _Localdb.Quotation_Items
+                .Include(item => item.Materials)
+                .ToList();
         }
 
         [HttpGet("GetLocalQuotationItemsByID")]
@@ -500,7 +504,9 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var QI_Id = _Localdb.Quotation_Items.FirstOrDefault(x => x.QI_ID == Id);
+            var QI_Id = _Localdb.Quotation_Items
+                .Include(item => item.Materials)
+                .FirstOrDefault(x => x.QI_ID == Id);
             if (QI_Id == null)
             {
                 return NotFound("Client not found.");
@@ -508,16 +514,80 @@ namespace APINIMIRHEMAA.Controllers
             return QI_Id;
         }
 
+        [HttpGet("GetLocalQuotationItemMaterials")]
+        public async Task<ActionResult<List<QuotationItemMaterial>>> GetLocalQuotationItemMaterials(int quotationItemId)
+        {
+            if (quotationItemId <= 0)
+            {
+                return BadRequest("A valid quotation item ID is required.");
+            }
+            if (!await _Localdb.Quotation_Items.AnyAsync(item => item.QI_ID == quotationItemId))
+            {
+                return NotFound("Quotation item not found.");
+            }
+
+            var materials = await _Localdb.QuotationItemMaterials
+                .AsNoTracking()
+                .Where(material => material.QI_ID == quotationItemId)
+                .OrderBy(material => material.Code_Name)
+                .ToListAsync();
+            return Ok(materials);
+        }
+
         [HttpPost("AddLocalQuotationItems")]
-        public ActionResult<Quotation_Items> AddLocalQuotationsItems([FromBody] Quotation_Items QuotationItemDetails)
+        public async Task<ActionResult<Quotation_Items>> AddLocalQuotationsItems([FromBody] AddQuotationItemDto request)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
-            _Localdb.Quotation_Items.Add(QuotationItemDetails);
-            _Localdb.SaveChanges();
-            return Ok(QuotationItemDetails);
+            if (request.QS_ID <= 0)
+            {
+                return BadRequest("A valid quotation store ID is required.");
+            }
+            if (request.Materials.Any(material => material.Material_ID <= 0) ||
+                request.Materials.Select(material => material.Material_ID).Distinct().Count() != request.Materials.Count)
+            {
+                return BadRequest("Selected materials must have valid, unique material IDs.");
+            }
+
+            var materialIds = request.Materials.Select(material => material.Material_ID).ToList();
+            var materialsById = await _Localdb.Materials
+                .Where(material => materialIds.Contains(material.Material_ID))
+                .ToDictionaryAsync(material => material.Material_ID);
+            if (materialsById.Count != materialIds.Count)
+            {
+                return BadRequest("One or more selected materials no longer exist.");
+            }
+
+            var quotationItem = new Quotation_Items
+            {
+                Requirements = request.Requirements,
+                Description = request.Description,
+                Width = request.Width,
+                Height = request.Height,
+                Measurement_Unit = request.Measurement_Unit,
+                Price_Per_Square_Inch = request.Price_Per_Square_Inch,
+                Quantity = request.Quantity,
+                Unit_Price = request.Unit_Price,
+                Total_Amount = request.Total_Amount,
+                QS_ID = request.QS_ID,
+                Materials = request.Materials.Select(selection =>
+                {
+                    var material = materialsById[selection.Material_ID];
+                    return new QuotationItemMaterial
+                    {
+                        Material_ID = material.Material_ID,
+                        Code_Name = material.Code_Name,
+                        Item_Name = material.Item_Name,
+                        Unit = material.Unit
+                    };
+                }).ToList()
+            };
+
+            _Localdb.Quotation_Items.Add(quotationItem);
+            await _Localdb.SaveChangesAsync();
+            return Ok(quotationItem);
         }
 
         [HttpPost("UpdateLocalQuotationItems")]
@@ -815,7 +885,69 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalJobOrder")]
         public List<JobOrder> GetAllJobOrder()
         {
-            return _Localdb.JobOrder.ToList();
+            return _Localdb.JobOrder
+                .AsNoTracking()
+                .Include(jobOrder => jobOrder.Comments)
+                .ToList();
+        }
+
+        [HttpGet("GetLocalJobOrderItemsByJobOrderID")]
+        public async Task<ActionResult<List<JobOrderItems>>> GetLocalJobOrderItemsByJobOrderID(int jobOrderId)
+        {
+            if (jobOrderId <= 0)
+            {
+                return BadRequest("Invalid Job Order ID.");
+            }
+
+            if (!await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == jobOrderId))
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var items = await _Localdb.JobOrderItems
+                .AsNoTracking()
+                .Where(item => item.JobOrder_ID == jobOrderId)
+                .OrderBy(item => item.JobOrderItems_ID)
+                .ToListAsync();
+            return Ok(items);
+        }
+
+        [HttpPost("AddLocalJobOrderComment")]
+        public async Task<ActionResult<JobOrderComment>> AddLocalJobOrderComment(
+            [FromBody] AddJobOrderCommentRequest request)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var commentText = request.Comment.Trim();
+            if (string.IsNullOrWhiteSpace(commentText))
+            {
+                return BadRequest("A comment is required.");
+            }
+
+            if (!await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == request.JobOrder_ID))
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
+            if (string.IsNullOrWhiteSpace(employeeName))
+            {
+                return BadRequest("The signed-in employee name is unavailable.");
+            }
+
+            var comment = new JobOrderComment
+            {
+                JobOrder_ID = request.JobOrder_ID,
+                Employee_Name = employeeName,
+                Comment = commentText,
+                CreatedAt = DateTime.UtcNow
+            };
+            _Localdb.JobOrderComments.Add(comment);
+            await _Localdb.SaveChangesAsync();
+            return Ok(comment);
         }
 
         [HttpGet("GetInstallationReportJobOrders")]
@@ -943,7 +1075,9 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var jobOrder = _Localdb.JobOrder.FirstOrDefault(x => x.JobOrder_ID == id);
+            var jobOrder = _Localdb.JobOrder
+                .Include(x => x.Comments)
+                .FirstOrDefault(x => x.JobOrder_ID == id);
             if (jobOrder == null)
             {
                 return NotFound();
@@ -952,22 +1086,53 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("AddLocalJobOrder")]
-        public ActionResult<JobOrder> AddLocalJobOrder(JobOrder jobOrder)
+        public ActionResult<JobOrder> AddLocalJobOrder([FromBody] CreateJobOrderRequest request)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
 
-            var conforme = _Localdb.Conforme.FirstOrDefault(x => x.FileID == jobOrder.Conforme_FileID);
+            var specialInstruction = request.SpecialInstruction?.Trim();
+            var employeeName = string.IsNullOrWhiteSpace(specialInstruction)
+                ? ""
+                : _Localdb.GetCurrentEmployeeName().Trim();
+            if (!string.IsNullOrWhiteSpace(specialInstruction) && string.IsNullOrWhiteSpace(employeeName))
+            {
+                return BadRequest("The signed-in employee name is unavailable, so the special instruction cannot be saved.");
+            }
+
+            var conforme = _Localdb.Conforme.FirstOrDefault(x => x.FileID == request.Conforme_FileID);
             if (conforme == null)
             {
-                return BadRequest($"Conforme {jobOrder.Conforme_FileID} was not found.");
+                return BadRequest($"Conforme {request.Conforme_FileID} was not found.");
+            }
+
+            var jobOrder = new JobOrder
+            {
+                Conforme_FileID = request.Conforme_FileID,
+                Title = request.Title,
+                Installation_Date = request.Installation_Date,
+                Target_Delivery = request.Target_Delivery,
+                Date_Delivered = request.Date_Delivered,
+                Tiling = request.Tiling,
+                Eyelet = request.Eyelet,
+                Bleeding = request.Bleeding,
+                Status = request.Status
+            };
+            if (!string.IsNullOrWhiteSpace(specialInstruction))
+            {
+                jobOrder.Comments.Add(new JobOrderComment
+                {
+                    Employee_Name = employeeName,
+                    Comment = specialInstruction,
+                    CreatedAt = DateTime.UtcNow
+                });
             }
 
             _Localdb.Add(jobOrder);
             conforme.Status = "Completed";
-            foreach (var purchaseOrder in _Localdb.PurchaseOrder.Where(x => x.Conforme_FileID == jobOrder.Conforme_FileID))
+            foreach (var purchaseOrder in _Localdb.PurchaseOrder.Where(x => x.Conforme_FileID == request.Conforme_FileID))
             {
                 purchaseOrder.Status = "Completed";
             }
@@ -1070,7 +1235,6 @@ namespace APINIMIRHEMAA.Controllers
             updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
             updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
-            updateJobOrder.Comment = _jobOrder.Comment;
 
             _CloudDb.SaveChanges();
             return Ok(updateJobOrder);

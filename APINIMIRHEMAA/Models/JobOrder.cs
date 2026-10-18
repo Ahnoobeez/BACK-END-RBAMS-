@@ -9,7 +9,6 @@ namespace APINIMIRHEMAA.Models
         public int JobOrder_ID { get; set; }
         public int Conforme_FileID { get; set; }
         public string? Title { get; set; }
-        public string? Comment { get; set; }
         public DateOnly? Installation_Date { get; set; }
         public DateOnly? Target_Delivery { get; set; }
         public DateOnly? Date_Delivered { get; set; }
@@ -17,7 +16,7 @@ namespace APINIMIRHEMAA.Models
         public bool? Eyelet { get; set; }
         public bool? Bleeding { get; set; }
         public string? Status { get; set; }
-
+        public List<JobOrderComment> Comments { get; set; } = new();
 
     }
 }
