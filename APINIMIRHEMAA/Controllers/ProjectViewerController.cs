@@ -89,6 +89,8 @@ namespace APINIMIRHEMAA.Controllers
                 storesById.TryGetValue(item.QS_ID, out var store);
                 return new ProjectViewerQuotationItemDto
                 {
+                    QuotationItemId = item.QI_ID,
+                    QuotationStoreId = item.QS_ID,
                     Store = store?.Store,
                     Requirement = item.Requirements,
                     Description = item.Description,
@@ -107,6 +109,10 @@ namespace APINIMIRHEMAA.Controllers
                 .AsNoTracking()
                 .Where(record => record.Quotation_ID == quotationId)
                 .ToListAsync();
+            foreach (var conforme in conformes)
+            {
+                conforme.FIleData = _encryptionService.TryDecrypt(conforme.FIleData);
+            }
             var conformeIds = conformes.Select(record => record.FileID).ToList();
             var purchaseOrders = conformeIds.Count == 0
                 ? new List<Models.PurchaseOrder>()
@@ -114,6 +120,10 @@ namespace APINIMIRHEMAA.Controllers
                     .AsNoTracking()
                     .Where(record => conformeIds.Contains(record.Conforme_FileID))
                     .ToListAsync();
+            foreach (var purchaseOrder in purchaseOrders)
+            {
+                purchaseOrder.FileData = _encryptionService.TryDecrypt(purchaseOrder.FileData);
+            }
             var jobOrders = conformeIds.Count == 0
                 ? new List<Models.JobOrder>()
                 : await _localDb.JobOrder
@@ -164,7 +174,6 @@ namespace APINIMIRHEMAA.Controllers
                     .AsNoTracking()
                     .Where(record => jobOrderIds.Contains(record.JobOrder_ID))
                     .ToListAsync();
-
             if (!string.IsNullOrWhiteSpace(client?.Business_Style) &&
                 client.Business_Style.StartsWith("CfDJ8", StringComparison.Ordinal))
             {
@@ -208,5 +217,6 @@ namespace APINIMIRHEMAA.Controllers
                 Items = items
             });
         }
+
     }
 }

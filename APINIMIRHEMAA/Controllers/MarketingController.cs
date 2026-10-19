@@ -228,7 +228,9 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("UpdateLocalQuotations")]
-        public ActionResult<Quotation> UpdateLocalQuotations(Int32 Id, [FromBody] Quotation UpdateQuotation)
+        public async Task<ActionResult<Quotation>> UpdateLocalQuotations(
+            [FromQuery] int Id,
+            [FromBody] Quotation UpdateQuotation)
         {
             if (UpdateQuotation == null)
             {
@@ -240,10 +242,97 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
+            updateQuotation.Title = UpdateQuotation.Title;
+            updateQuotation.Delivery_Charge = UpdateQuotation.Delivery_Charge;
+            updateQuotation.Installation_Charge = UpdateQuotation.Installation_Charge;
             updateQuotation.Status = UpdateQuotation.Status;
+            updateQuotation.Comment = UpdateQuotation.Comment;
+            updateQuotation.Terms_Condition = UpdateQuotation.Terms_Condition;
+            updateQuotation.Start_Date = UpdateQuotation.Start_Date;
+            updateQuotation.Time = UpdateQuotation.Time;
 
-            _Localdb.SaveChanges();
-            return Ok(UpdateQuotation);
+            var storeIds = await _Localdb.Quotation_Store
+                .Where(store => store.Quotation_ID == Id)
+                .Select(store => store.QS_ID)
+                .ToListAsync();
+            updateQuotation.Sub_Total = decimal.Round(
+                await _Localdb.Quotation_Items
+                    .Where(item => storeIds.Contains(item.QS_ID))
+                    .SumAsync(item => item.Total_Amount ?? 0m),
+                2,
+                MidpointRounding.AwayFromZero);
+            updateQuotation.VAT = decimal.Round(updateQuotation.Sub_Total * 0.12m, 2, MidpointRounding.AwayFromZero);
+            updateQuotation.Overall_Total = decimal.Round(
+                updateQuotation.Sub_Total + (updateQuotation.Delivery_Charge ?? 0m) +
+                (updateQuotation.Installation_Charge ?? 0m) + (updateQuotation.VAT ?? 0m),
+                2,
+                MidpointRounding.AwayFromZero);
+
+            await _Localdb.SaveChangesAsync();
+            return Ok(updateQuotation);
+        }
+
+        [HttpPost("UpdateLocalQuotationStatus")]
+        public async Task<ActionResult> UpdateLocalQuotationStatus(
+            [FromQuery] int Id,
+            [FromQuery] string? Status)
+        {
+            if (Id <= 0)
+            {
+                return BadRequest("A valid quotation ID is required.");
+            }
+            if (string.IsNullOrWhiteSpace(Status))
+            {
+                return BadRequest("A quotation status is required.");
+            }
+
+            var quotation = await _Localdb.Quotation
+                .FirstOrDefaultAsync(record => record.Quotation_ID == Id);
+            if (quotation == null)
+            {
+                return NotFound("Quotation not found.");
+            }
+
+            quotation.Status = Status.Trim();
+            await _Localdb.SaveChangesAsync();
+            return Ok(new { quotation.Quotation_ID, quotation.Status });
+        }
+
+        [HttpPost("RejectLocalQuotation")]
+        public async Task<ActionResult> RejectLocalQuotation([FromQuery] int Id)
+        {
+            if (Id <= 0)
+            {
+                return BadRequest("A valid quotation ID is required.");
+            }
+
+            var quotation = await _Localdb.Quotation
+                .FirstOrDefaultAsync(record => record.Quotation_ID == Id);
+            if (quotation == null)
+            {
+                return NotFound("Quotation not found.");
+            }
+
+            var currentStatus = quotation.Status?.Trim();
+            if (string.Equals(currentStatus, "Rejected", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict("This quotation has already been rejected.");
+            }
+            if (string.Equals(currentStatus, "Completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(currentStatus, "Complete", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict("A completed quotation cannot be rejected.");
+            }
+            if (await _Localdb.Conforme
+                .AsNoTracking()
+                .AnyAsync(record => record.Quotation_ID == Id))
+            {
+                return Conflict("A quotation with an attached Conforme cannot be rejected.");
+            }
+
+            quotation.Status = "Rejected";
+            await _Localdb.SaveChangesAsync();
+            return Ok(new { quotation.Quotation_ID, quotation.Status });
         }
 
         [HttpPut ("DeleteQuotation")]
@@ -693,32 +782,89 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("UpdateLocalQuotationItems")]
-        public ActionResult<Quotation_Items> UpdateLocalQuotationItems(Int32 Id, [FromBody] Quotation_Items UpdateQuotationItems)
+        public async Task<ActionResult<Quotation_Items>> UpdateLocalQuotationItems(
+            [FromQuery] int Id,
+            [FromBody] Quotation_Items UpdateQuotationItems)
         {
-            if (UpdateQuotationItems == null)
+            if (Id <= 0 || UpdateQuotationItems == null)
             {
-                return BadRequest(UpdateQuotationItems);
+                return BadRequest("A valid quotation item ID and record are required.");
             }
-            var updateQuotationItems = _Localdb.Quotation_Items.FirstOrDefault(x => x.QI_ID == Id);
+            var updateQuotationItems = await _Localdb.Quotation_Items
+                .FirstOrDefaultAsync(item => item.QI_ID == Id);
             if (updateQuotationItems == null)
             {
                 return NotFound();
             }
 
-            updateQuotationItems.QI_ID = UpdateQuotationItems.QI_ID;
+            if (string.IsNullOrWhiteSpace(UpdateQuotationItems.Requirements) ||
+                UpdateQuotationItems.Width is not > 0 ||
+                UpdateQuotationItems.Height is not > 0 ||
+                UpdateQuotationItems.Quantity is not > 0 ||
+                UpdateQuotationItems.Price_Per_Square_Inch is not >= 0)
+            {
+                return BadRequest("Requirement, dimensions, quantity, and a non-negative price per square inch are required.");
+            }
+
+            var inchesPerUnit = UpdateQuotationItems.Measurement_Unit?.Trim().ToLowerInvariant() switch
+            {
+                "mm" => 1m / 25.4m,
+                "cm" => 1m / 2.54m,
+                "inch" => 1m,
+                "m" => 100m / 2.54m,
+                _ => 0m
+            };
+            if (inchesPerUnit == 0m)
+            {
+                return BadRequest("A supported measurement unit is required (mm, cm, inch, or m).");
+            }
+
+            updateQuotationItems.Requirements = UpdateQuotationItems.Requirements;
             updateQuotationItems.Description = UpdateQuotationItems.Description;
             updateQuotationItems.Width = UpdateQuotationItems.Width;
             updateQuotationItems.Height = UpdateQuotationItems.Height;
             updateQuotationItems.Measurement_Unit = UpdateQuotationItems.Measurement_Unit;
             updateQuotationItems.Quantity = UpdateQuotationItems.Quantity;
             updateQuotationItems.Price_Per_Square_Inch = UpdateQuotationItems.Price_Per_Square_Inch;
-            updateQuotationItems.Unit_Price = UpdateQuotationItems.Unit_Price;
-            updateQuotationItems.Total_Amount = UpdateQuotationItems.Total_Amount;
-            updateQuotationItems.QS_ID = UpdateQuotationItems.QS_ID;
+            updateQuotationItems.Unit_Price = decimal.Round(
+                UpdateQuotationItems.Width.Value * UpdateQuotationItems.Height.Value *
+                inchesPerUnit * inchesPerUnit * UpdateQuotationItems.Price_Per_Square_Inch.Value,
+                2,
+                MidpointRounding.AwayFromZero);
+            updateQuotationItems.Total_Amount = decimal.Round(
+                updateQuotationItems.Unit_Price.Value * UpdateQuotationItems.Quantity.Value,
+                2,
+                MidpointRounding.AwayFromZero);
 
+            var quotationStore = await _Localdb.Quotation_Store
+                .FirstOrDefaultAsync(store => store.QS_ID == updateQuotationItems.QS_ID);
+            if (quotationStore == null)
+            {
+                return BadRequest("The quotation item is not linked to a saved quotation store.");
+            }
+            var quotation = await _Localdb.Quotation
+                .FirstOrDefaultAsync(record => record.Quotation_ID == quotationStore.Quotation_ID);
+            if (quotation == null)
+            {
+                return BadRequest("The quotation item is not linked to a saved quotation.");
+            }
+            var storeIds = await _Localdb.Quotation_Store
+                .Where(store => store.Quotation_ID == quotation.Quotation_ID)
+                .Select(store => store.QS_ID)
+                .ToListAsync();
+            var subtotal = await _Localdb.Quotation_Items
+                .Where(item => storeIds.Contains(item.QS_ID))
+                .SumAsync(item => item.Total_Amount ?? 0m);
+            quotation.Sub_Total = decimal.Round(subtotal, 2, MidpointRounding.AwayFromZero);
+            quotation.VAT = decimal.Round(quotation.Sub_Total * 0.12m, 2, MidpointRounding.AwayFromZero);
+            quotation.Overall_Total = decimal.Round(
+                quotation.Sub_Total + (quotation.Delivery_Charge ?? 0m) +
+                (quotation.Installation_Charge ?? 0m) + (quotation.VAT ?? 0m),
+                2,
+                MidpointRounding.AwayFromZero);
 
-            _Localdb.SaveChanges();
-            return Ok(UpdateQuotationItems);
+            await _Localdb.SaveChangesAsync();
+            return Ok(updateQuotationItems);
         }
 
         [HttpPut("DeleteQuotationItems")]
@@ -785,13 +931,14 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
-            UpdateQuotationStore.QS_ID = UpdateQuotationStore.QS_ID;
-            UpdateQuotationStore.Store = UpdateQuotationStore.Store;
-            UpdateQuotationStore.Quotation_ID = UpdateQuotationStore.Quotation_ID;
-
+            if (UpdateQuotationStore.Quotation_ID != updateQuotationStore.Quotation_ID)
+            {
+                return BadRequest("A quotation store cannot be moved to a different quotation.");
+            }
+            updateQuotationStore.Store = UpdateQuotationStore.Store;
 
             _Localdb.SaveChanges();
-            return Ok(UpdateQuotationStore);
+            return Ok(updateQuotationStore);
         }
 
         [HttpPut("DeleteQuotationStore")]
@@ -879,7 +1026,8 @@ namespace APINIMIRHEMAA.Controllers
         }
 
 
-        [HttpPost ("UpdateLocalConforme")]
+        [HttpPost("UpdateLocalConforme")]
+        [RequestSizeLimit(10_000_000)]
         public ActionResult<Conforme> UpdateLocalConforme(Int32 Id, [FromBody] Conforme _conforme)
         {
             if (_conforme == null)
@@ -892,6 +1040,17 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
+            if (_conforme.FIleData is { Length: > 0 })
+            {
+                var error = UploadValidator.ValidatePdf(_conforme.FIleData);
+                if (error != null)
+                {
+                    return BadRequest(error);
+                }
+                updateConforme.FIleData = _encryptionService.Encrypt(_conforme.FIleData);
+            }
+            updateConforme.FileName = _conforme.FileName;
+            updateConforme.FileExtension = _conforme.FileExtension;
             updateConforme.Status = _conforme.Status;
 
             _Localdb.SaveChanges();
@@ -1170,6 +1329,56 @@ namespace APINIMIRHEMAA.Controllers
             });
         }
 
+        [HttpPost("UpdateLocalInstallationReport")]
+        public async Task<ActionResult<InstallationReport>> UpdateLocalInstallationReport(
+            [FromQuery] int Id,
+            [FromBody] InstallationReport report)
+        {
+            if (Id <= 0 || report == null)
+            {
+                return BadRequest("A valid installation report ID and record are required.");
+            }
+
+            var savedReport = await _Localdb.InstallationReport
+                .FirstOrDefaultAsync(record => record.InstallationReport_ID == Id);
+            if (savedReport == null)
+            {
+                return NotFound("Installation report not found.");
+            }
+            if (!await _Localdb.JobOrder
+                .AnyAsync(jobOrder => jobOrder.JobOrder_ID == report.JobOrder_ID))
+            {
+                return BadRequest("The selected Job Order was not found.");
+            }
+
+            savedReport.JobOrder_ID = report.JobOrder_ID;
+            savedReport.ClientName = report.ClientName;
+            savedReport.ProjectName = report.ProjectName;
+            savedReport.Location = report.Location;
+            savedReport.ReportDate = report.ReportDate;
+            savedReport.TimeStarted = report.TimeStarted;
+            savedReport.TimeEnded = report.TimeEnded;
+            savedReport.Installers = report.Installers;
+            savedReport.OnTime = report.OnTime;
+            savedReport.UniformAndId = report.UniformAndId;
+            savedReport.GraphicsProperlyInstalled = report.GraphicsProperlyInstalled;
+            savedReport.ProblemsOccurred = report.ProblemsOccurred;
+            savedReport.ProblemsNote = report.ProblemsNote;
+            savedReport.AreaClean = report.AreaClean;
+            savedReport.InstallersMannered = report.InstallersMannered;
+            savedReport.ClientRemarks = report.ClientRemarks;
+            savedReport.Obstruction = report.Obstruction;
+            savedReport.ObstructionDetails = report.ObstructionDetails;
+            savedReport.GraphicsDamaged = report.GraphicsDamaged;
+            savedReport.DamageDetails = report.DamageDetails;
+            savedReport.InstallerRemarks = report.InstallerRemarks;
+            savedReport.ClientSignature = report.ClientSignature;
+            savedReport.PreparedBy = report.PreparedBy;
+            savedReport.ApprovedBy = report.ApprovedBy;
+            await _Localdb.SaveChangesAsync();
+            return Ok(savedReport);
+        }
+
         [HttpGet("GetLocalJobOrderByID")]
         public ActionResult<JobOrder> GetLocalJobOrderByID(int id)
         {
@@ -1255,6 +1464,13 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
+            updateJobOrder.Title = _jobOrder.Title;
+            updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
+            updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
+            updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
+            updateJobOrder.Tiling = _jobOrder.Tiling;
+            updateJobOrder.Eyelet = _jobOrder.Eyelet;
+            updateJobOrder.Bleeding = _jobOrder.Bleeding;
             updateJobOrder.Status = _jobOrder.Status;
 
 
@@ -1405,6 +1621,12 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
+            updateJobOrderItems.Store = _jobOrderItems.Store;
+            updateJobOrderItems.Requirements = _jobOrderItems.Requirements;
+            updateJobOrderItems.Description = _jobOrderItems.Description;
+            updateJobOrderItems.Width = _jobOrderItems.Width;
+            updateJobOrderItems.Length = _jobOrderItems.Length;
+            updateJobOrderItems.Quantity = _jobOrderItems.Quantity;
             updateJobOrderItems.Production_Initial = _jobOrderItems.Production_Initial;
             updateJobOrderItems.Artist_Initial = _jobOrderItems.Artist_Initial;
             updateJobOrderItems.Remarks = _jobOrderItems.Remarks;
@@ -1531,7 +1753,10 @@ namespace APINIMIRHEMAA.Controllers
             var error = UploadValidator.ValidatePdf(purchaseOrder.FileData);
             if (error != null) return BadRequest(error);
 
-            purchaseOrder.Status = "Pending";
+            purchaseOrder.Status = _Localdb.JobOrder.Any(
+                jobOrder => jobOrder.Conforme_FileID == purchaseOrder.Conforme_FileID)
+                ? "Completed"
+                : "Pending";
             var plain = purchaseOrder.FileData;
             purchaseOrder.FileData = _encryptionService.Encrypt(plain);
             _Localdb.PurchaseOrder.Add(purchaseOrder);
@@ -1555,7 +1780,10 @@ namespace APINIMIRHEMAA.Controllers
 
             foreach (var f in purchaseOrders)
             {
-                f.Status = "Pending";
+                f.Status = _Localdb.JobOrder.Any(
+                    jobOrder => jobOrder.Conforme_FileID == f.Conforme_FileID)
+                    ? "Completed"
+                    : "Pending";
                 f.FileData = _encryptionService.Encrypt(f.FileData);
                 _Localdb.PurchaseOrder.Add(f);
             }
@@ -1564,6 +1792,7 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("UpdateLocalPurchaseOrder")]
+        [RequestSizeLimit(10_000_000)]
         public ActionResult<PurchaseOrder> UpdateLocalPurchaseOrder(Int32 Id, [FromBody] PurchaseOrder _purchaseOrder)
         {
             if (_purchaseOrder == null)
@@ -1576,7 +1805,21 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
-            updatePurchaseOrder.Status = _purchaseOrder.Status;
+            if (_purchaseOrder.FileData is { Length: > 0 })
+            {
+                var error = UploadValidator.ValidatePdf(_purchaseOrder.FileData);
+                if (error != null)
+                {
+                    return BadRequest(error);
+                }
+                updatePurchaseOrder.FileData = _encryptionService.Encrypt(_purchaseOrder.FileData);
+            }
+            updatePurchaseOrder.FileName = _purchaseOrder.FileName;
+            updatePurchaseOrder.FileExtension = _purchaseOrder.FileExtension;
+            updatePurchaseOrder.Status = _Localdb.JobOrder.Any(
+                jobOrder => jobOrder.Conforme_FileID == updatePurchaseOrder.Conforme_FileID)
+                ? "Completed"
+                : "Pending";
 
             _Localdb.SaveChanges();
             return Ok(updatePurchaseOrder);
@@ -1624,7 +1867,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
-            purchaseOrder.Status = "Pending";
+            purchaseOrder.Status = _CloudDb.JobOrder.Any(
+                jobOrder => jobOrder.Conforme_FileID == purchaseOrder.Conforme_FileID)
+                ? "Completed"
+                : "Pending";
             _CloudDb.Add(purchaseOrder);
             _CloudDb.SaveChanges();
             return Ok(purchaseOrder);
@@ -1646,6 +1892,10 @@ namespace APINIMIRHEMAA.Controllers
             updatePurchaseOrder.FileName = _purchaseOrder.FileName;
             updatePurchaseOrder.FileExtension = _purchaseOrder.FileExtension;
             updatePurchaseOrder.FileData = _purchaseOrder.FileData;
+            updatePurchaseOrder.Status = _CloudDb.JobOrder.Any(
+                jobOrder => jobOrder.Conforme_FileID == updatePurchaseOrder.Conforme_FileID)
+                ? "Completed"
+                : "Pending";
             _CloudDb.SaveChanges();
             return Ok(updatePurchaseOrder);
         }
@@ -1713,7 +1963,22 @@ namespace APINIMIRHEMAA.Controllers
 
             for (int i = 0; i < graphicsFiles.Count; i++)
             {
-                var error = UploadValidator.ValidateImageOrPdf(graphicsFiles[i].FileData);
+                var graphics = graphicsFiles[i];
+                if (graphics == null)
+                    return BadRequest($"File {i + 1}: A graphics record is required.");
+
+                if (graphics.Quotation_ID <= 0 ||
+                    !_Localdb.Quotation.AsNoTracking().Any(quotation => quotation.Quotation_ID == graphics.Quotation_ID))
+                    return BadRequest($"File {i + 1}: Select a valid quotation.");
+
+                var link = graphics.Link?.Trim();
+                if (string.IsNullOrWhiteSpace(link) || link.Length > 2048 ||
+                    !Uri.TryCreate(link, UriKind.Absolute, out var parsedLink) ||
+                    (parsedLink.Scheme != Uri.UriSchemeHttp && parsedLink.Scheme != Uri.UriSchemeHttps))
+                    return BadRequest($"File {i + 1}: A valid HTTP or HTTPS link is required.");
+                graphics.Link = link;
+
+                var error = UploadValidator.ValidateImageOrPdf(graphics.FileData);
                 if (error != null) return BadRequest($"File {i + 1}: {error}");
             }
 
@@ -1740,6 +2005,10 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             updateGraphics.FileData = _encryptionService.Encrypt(_graphics.FileData);
+            if (_graphics.Link != null)
+            {
+                updateGraphics.Link = _graphics.Link;
+            }
 
             _Localdb.SaveChanges();
             return Ok(updateGraphics);
@@ -2116,6 +2385,13 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
+            updateDeliveryReceipt.JobOrderID = deliveryReceipt.JobOrderID;
+            updateDeliveryReceipt.Title = deliveryReceipt.Title;
+            updateDeliveryReceipt.ClientName = deliveryReceipt.ClientName;
+            updateDeliveryReceipt.Address = deliveryReceipt.Address;
+            updateDeliveryReceipt.Terms = deliveryReceipt.Terms;
+            updateDeliveryReceipt.date = deliveryReceipt.date;
+            updateDeliveryReceipt.time = deliveryReceipt.time;
             updateDeliveryReceipt.Status = deliveryReceipt.Status;
 
             _Localdb.SaveChanges();
@@ -2235,6 +2511,31 @@ namespace APINIMIRHEMAA.Controllers
             _Localdb.Add(deliveryReceiptItems);
             _Localdb.SaveChanges();
             return Ok(deliveryReceiptItems);
+        }
+
+        [HttpPost("UpdateLocalDeliveryReceiptItems")]
+        public ActionResult<DeliveryReceiptItems> UpdateLocalDeliveryReceiptItems(
+            [FromQuery] int Id,
+            [FromBody] DeliveryReceiptItems deliveryReceiptItems)
+        {
+            if (Id <= 0 || deliveryReceiptItems == null)
+            {
+                return BadRequest("A valid delivery receipt item ID and record are required.");
+            }
+
+            var savedItem = _Localdb.DeliveryReceiptItems
+                .FirstOrDefault(item => item.DeliveryReceiptItems_ID == Id);
+            if (savedItem == null)
+            {
+                return NotFound("Delivery receipt item not found.");
+            }
+            savedItem.Requirement = deliveryReceiptItems.Requirement;
+            savedItem.Description = deliveryReceiptItems.Description;
+            savedItem.Store = deliveryReceiptItems.Store;
+            savedItem.Quantity = deliveryReceiptItems.Quantity;
+            savedItem.Delivery_ID = deliveryReceiptItems.Delivery_ID;
+            _Localdb.SaveChanges();
+            return Ok(savedItem);
         }
 
         [HttpPut("DeleteLocalDeliveryReceiptsItems")]
@@ -2460,6 +2761,7 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("UpdateLocalCollectionReceipt")]
+        [RequestSizeLimit(10_000_000)]
         public ActionResult<CollectionReceipt> UpdateLocalCollectionReceipt(Int32 Id, [FromBody] CollectionReceipt collectionReceipt)
         {
             if (collectionReceipt == null)
@@ -2472,6 +2774,18 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
+            if (collectionReceipt.FileData is { Length: > 0 })
+            {
+                var error = UploadValidator.ValidateImage(collectionReceipt.FileData);
+                if (error != null)
+                {
+                    return BadRequest(error);
+                }
+                updateCollectionReceipt.FileData = collectionReceipt.FileData;
+            }
+            updateCollectionReceipt.FileName = collectionReceipt.FileName;
+            updateCollectionReceipt.FileExtension = collectionReceipt.FileExtension;
+            updateCollectionReceipt.JobOrderID = collectionReceipt.JobOrderID;
             updateCollectionReceipt.Status = collectionReceipt.Status;
 
             _Localdb.SaveChanges();

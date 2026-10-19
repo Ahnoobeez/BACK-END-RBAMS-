@@ -121,6 +121,11 @@ namespace APINIMIRHEMAA.Controllers
             }
             jobOrder.Comments = new List<JobOrderComment>();
             _Localdb.Add(jobOrder);
+            foreach (var purchaseOrder in _Localdb.PurchaseOrder.Where(
+                record => record.Conforme_FileID == jobOrder.Conforme_FileID))
+            {
+                purchaseOrder.Status = "Completed";
+            }
             _Localdb.SaveChanges();
             return Ok(jobOrder);
         }

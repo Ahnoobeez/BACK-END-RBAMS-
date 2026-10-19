@@ -41,6 +41,8 @@ namespace APINIMIRHEMAA.DTO.ProjectViewer
 
     public sealed class ProjectViewerQuotationItemDto
     {
+        public int QuotationItemId { get; init; }
+        public int QuotationStoreId { get; init; }
         public string? Store { get; init; }
         public string? Requirement { get; init; }
         public string? Description { get; init; }

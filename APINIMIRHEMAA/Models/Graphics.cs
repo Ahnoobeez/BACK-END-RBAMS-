@@ -11,5 +11,7 @@ namespace APINIMIRHEMAA.Models
         public string FileExtension { get; set; }
         public byte[] FileData { get; set; }
         public int Quotation_ID { get; set; }
+        [MaxLength(2048)]
+        public string? Link { get; set; }
     }
 }
