@@ -41,6 +41,20 @@ namespace APINIMIRHEMAA.Controllers
             return client;
         }
 
+        private static bool ClientNameExists(DbSet<ClientEntity> clients, string? clientName, int? excludingClientId = null)
+        {
+            var normalizedName = clientName?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedName))
+            {
+                return false;
+            }
+
+            var comparisonName = normalizedName.ToUpperInvariant();
+            return clients.Any(client =>
+                (!excludingClientId.HasValue || client.Client_ID != excludingClientId.Value) &&
+                client.Client_Name.Trim().ToUpper() == comparisonName);
+        }
+
         [HttpGet("GetLocalClients")] 
         public List<ClientEntity> GetAllLocalClients()
         {
@@ -72,6 +86,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            if (ClientNameExists(_Localdb.Clients, ClientDetails.Client_Name))
+            {
+                return Conflict("A client with this company name already exists.");
+            }
+
             var businessStyle = ClientDetails.Business_Style;
             ClientDetails.Business_Style = _encryptionService.Encrypt(businessStyle);
             _Localdb.Clients.Add(ClientDetails);
@@ -93,6 +112,10 @@ namespace APINIMIRHEMAA.Controllers
             if (clientDetails == null)
             {
                 return NotFound();
+            }
+            if (ClientNameExists(_Localdb.Clients, ClientDetails.Client_Name, Id))
+            {
+                return Conflict("A client with this company name already exists.");
             }
 
             clientDetails.Client_Name = ClientDetails.Client_Name;
@@ -159,6 +182,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            if (ClientNameExists(_Clouddb.Clients, ClientDetails.Client_Name))
+            {
+                return Conflict("A client with this company name already exists.");
+            }
+
             var businessStyle = ClientDetails.Business_Style;
             ClientDetails.Business_Style = _encryptionService.Encrypt(businessStyle);
             _Clouddb.Clients.Add(ClientDetails);
@@ -180,6 +208,10 @@ namespace APINIMIRHEMAA.Controllers
             if (clientDetails == null)
             {
                 return NotFound();
+            }
+            if (ClientNameExists(_Clouddb.Clients, ClientDetails.Client_Name, Id))
+            {
+                return Conflict("A client with this company name already exists.");
             }
 
             clientDetails.Client_Name = ClientDetails.Client_Name;

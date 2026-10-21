@@ -16,6 +16,8 @@ namespace APINIMIRHEMAA.Models
         public bool? Eyelet { get; set; }
         public bool? Bleeding { get; set; }
         public string? Status { get; set; }
+        public bool Production_Completed { get; set; }
+        public bool Technical_Completed { get; set; }
         public List<JobOrderComment> Comments { get; set; } = new();
 
     }

@@ -430,6 +430,9 @@ namespace APINIMIRHEMAA.Controllers
 
             using var tx = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
 
+            if (_Localdb.Purchased_Material.Any(existing => existing.SI_No == p.SI_No))
+                return Conflict("This SI No. is already used by another purchase record.");
+
             var inv = _Localdb.Inventory.FirstOrDefault(i => i.Material_ID == p.Material_ID);
             if (inv == null) return BadRequest("This material has no inventory record.");
 
@@ -611,6 +614,15 @@ namespace APINIMIRHEMAA.Controllers
             var amountError = CalculatePurchaseAmount(purchased_material, out var amount);
             if (amountError != null) return BadRequest(amountError);
 
+            using var tx = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
+
+            if (_Localdb.Purchased_Material.Any(existing =>
+                    existing.SI_No == purchased_material.SI_No &&
+                    existing.Purchased_ID != purchased_material.Purchased_ID))
+            {
+                return Conflict("This SI No. is already used by another purchase record.");
+            }
+
             var _purchased_material = _Localdb.Purchased_Material.FirstOrDefault(x => x.Purchased_ID == purchased_material.Purchased_ID);
             if (_purchased_material == null)
             {
@@ -628,6 +640,7 @@ namespace APINIMIRHEMAA.Controllers
             _purchased_material.Amount = amount;
             _purchased_material.Material_ID = purchased_material.Material_ID;
             _Localdb.SaveChanges();
+            tx.Commit();
 
             return Ok(_purchased_material);
         }
@@ -664,9 +677,14 @@ namespace APINIMIRHEMAA.Controllers
             var amountError = CalculatePurchaseAmount(purchased_material, out var amount);
             if (amountError != null) return BadRequest(amountError);
 
+            using var tx = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
+            if (_Localdb.Purchased_Material.Any(existing => existing.SI_No == purchased_material.SI_No))
+                return Conflict("This SI No. is already used by another purchase record.");
+
             purchased_material.Amount = amount;
             _Localdb.Purchased_Material.Add(purchased_material);
             _Localdb.SaveChanges();
+            tx.Commit();
             return Ok(purchased_material);
         }
 
@@ -679,6 +697,14 @@ namespace APINIMIRHEMAA.Controllers
             }
             var amountError = CalculatePurchaseAmount(purchased_material, out var amount);
             if (amountError != null) return BadRequest(amountError);
+
+            using var tx = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
+            if (_Localdb.Purchased_Material.Any(existing =>
+                    existing.SI_No == purchased_material.SI_No &&
+                    existing.Purchased_ID != purchased_material.Purchased_ID))
+            {
+                return Conflict("This SI No. is already used by another purchase record.");
+            }
 
             var _purchased_material = _Localdb.Purchased_Material.FirstOrDefault(x => x.Purchased_ID == purchased_material.Purchased_ID);
             if (_purchased_material == null)
@@ -697,6 +723,7 @@ namespace APINIMIRHEMAA.Controllers
             _purchased_material.Amount = amount;
             _purchased_material.Material_ID = purchased_material.Material_ID;
             _Localdb.SaveChanges();
+            tx.Commit();
 
             return Ok(_purchased_material);
         }

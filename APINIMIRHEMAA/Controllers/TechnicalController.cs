@@ -127,6 +127,27 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(jobOrder);
         }
 
+        [HttpPost("CompleteLocalJobOrder")]
+        public async Task<ActionResult<JobOrder>> CompleteLocalJobOrder(int jobOrderId)
+        {
+            if (jobOrderId <= 0)
+            {
+                return BadRequest("A valid Job Order ID is required.");
+            }
+
+            var updatedRows = await _Localdb.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE [dbo].[JobOrder] SET [Technical_Completed] = 1, [Status] = CASE WHEN [Production_Completed] = 1 THEN N'Completed' ELSE N'In Progress' END WHERE [JobOrder_ID] = {jobOrderId}");
+            if (updatedRows == 0)
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var jobOrder = await _Localdb.JobOrder
+                .AsNoTracking()
+                .FirstAsync(record => record.JobOrder_ID == jobOrderId);
+            return Ok(jobOrder);
+        }
+
         [HttpPost("UpdateLocalJobOrder")]
         public ActionResult<JobOrder> UpdateLocalJobOrder(Int32 Id, [FromBody] JobOrder _jobOrder)
         {
