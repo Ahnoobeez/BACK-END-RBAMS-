@@ -1,8 +1,9 @@
-﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.InstallationReport;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
 using APINIMIRHEMAA.DTO.JobOrders;
 using APINIMIRHEMAA.DTO.QuotationItems;
+using APINIMIRHEMAA.DTO.ServiceInvoice;
 using APINIMIRHEMAA.Models;
 using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -1621,6 +1622,10 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
+            if (_jobOrderItems.QI_ID.HasValue)
+            {
+                updateJobOrderItems.QI_ID = _jobOrderItems.QI_ID;
+            }
             updateJobOrderItems.Store = _jobOrderItems.Store;
             updateJobOrderItems.Requirements = _jobOrderItems.Requirements;
             updateJobOrderItems.Description = _jobOrderItems.Description;
@@ -2111,12 +2116,110 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid service invoice ID.");
             }
-            var serviceInvoice = _Localdb.ServiceInvoice.FirstOrDefault(x => x.Quantity == id);
+            var serviceInvoice = _Localdb.ServiceInvoice.FirstOrDefault(x => x.ServiceInvoice_ID == id);
             if (serviceInvoice == null)
             {
                 return NotFound();
             }
             return Ok(serviceInvoice);
+        }
+
+        [HttpGet("GetLocalServiceInvoiceJobOrderItems")]
+        public async Task<ActionResult<List<ServiceInvoiceJobOrderItemDto>>> GetLocalServiceInvoiceJobOrderItems(int jobOrderId)
+        {
+            if (jobOrderId <= 0)
+            {
+                return BadRequest("Invalid Job Order ID.");
+            }
+
+            var jobOrder = await _Localdb.JobOrder
+                .AsNoTracking()
+                .FirstOrDefaultAsync(order => order.JobOrder_ID == jobOrderId);
+            if (jobOrder is null)
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var jobOrderItems = await _Localdb.JobOrderItems
+                .AsNoTracking()
+                .Where(item => item.JobOrder_ID == jobOrderId)
+                .OrderBy(item => item.JobOrderItems_ID)
+                .ToListAsync();
+            if (jobOrderItems.Count == 0)
+            {
+                return Ok(new List<ServiceInvoiceJobOrderItemDto>());
+            }
+
+            var quotationItems = new List<Quotation_Items>();
+            var storeNamesById = new Dictionary<int, string>();
+            var conforme = await _Localdb.Conforme
+                .AsNoTracking()
+                .FirstOrDefaultAsync(file => file.FileID == jobOrder.Conforme_FileID);
+            if (conforme is not null)
+            {
+                var stores = await _Localdb.Quotation_Store
+                    .AsNoTracking()
+                    .Where(store => store.Quotation_ID == conforme.Quotation_ID)
+                    .ToListAsync();
+                storeNamesById = stores.ToDictionary(store => store.QS_ID, store => store.Store ?? string.Empty);
+                var storeIds = stores.Select(store => store.QS_ID).ToList();
+                quotationItems = await _Localdb.Quotation_Items
+                    .AsNoTracking()
+                    .Where(item => storeIds.Contains(item.QS_ID))
+                    .OrderBy(item => item.QI_ID)
+                    .ToListAsync();
+            }
+
+            var matchedQuotationItemIds = new HashSet<int>();
+            var result = new List<ServiceInvoiceJobOrderItemDto>(jobOrderItems.Count);
+            foreach (var jobOrderItem in jobOrderItems)
+            {
+                var quotationItem = jobOrderItem.QI_ID.HasValue
+                    ? quotationItems.FirstOrDefault(item => item.QI_ID == jobOrderItem.QI_ID.Value)
+                    : null;
+
+                if (quotationItem is null)
+                {
+                    var matchingItems = quotationItems.Where(item =>
+                        !matchedQuotationItemIds.Contains(item.QI_ID) &&
+                        storeNamesById.TryGetValue(item.QS_ID, out var storeName) &&
+                        string.Equals(storeName.Trim(), jobOrderItem.Store?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(item.Requirements?.Trim(), jobOrderItem.Requirements?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(item.Description?.Trim(), jobOrderItem.Description?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                    quotationItem = matchingItems.FirstOrDefault(item =>
+                        !jobOrderItem.Quantity.HasValue ||
+                        item.Quantity == jobOrderItem.Quantity.Value)
+                        ?? matchingItems.FirstOrDefault();
+                }
+
+                if (quotationItem is not null)
+                {
+                    matchedQuotationItemIds.Add(quotationItem.QI_ID);
+                }
+
+                var dimensions = string.IsNullOrWhiteSpace(jobOrderItem.Width) &&
+                                 string.IsNullOrWhiteSpace(jobOrderItem.Length)
+                    ? null
+                    : $"{jobOrderItem.Width} x {jobOrderItem.Length}";
+                var description = string.Join(" - ", new[]
+                {
+                    jobOrderItem.Requirements,
+                    jobOrderItem.Description,
+                    dimensions
+                }.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!.Trim()));
+
+                result.Add(new ServiceInvoiceJobOrderItemDto
+                {
+                    Quantity = jobOrderItem.Quantity,
+                    Unit = quotationItem?.Measurement_Unit?.Trim() ?? string.Empty,
+                    Description = description,
+                    Unit_Price = 0,
+                    Amount = 0
+                });
+            }
+
+            return Ok(result);
         }
 
         [HttpPost("AddLocalServiceInvoice")]
@@ -2134,9 +2237,108 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound("The selected Job Order was not found.");
             }
+            if (serviceInvoice.Invoice_Date == default)
+            {
+                serviceInvoice.Invoice_Date = DateOnly.FromDateTime(DateTime.Today);
+            }
             _Localdb.ServiceInvoice.Add(serviceInvoice);
             _Localdb.SaveChanges();
             return Ok(serviceInvoice);
+        }
+
+        [HttpPost("AddLocalServiceInvoiceWithItems")]
+        public async Task<ActionResult<ServiceInvoice>> AddLocalServiceInvoiceWithItems(
+            [FromBody] CreateServiceInvoiceDto submission)
+        {
+            if (submission.JobOrder_ID <= 0 ||
+                !await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == submission.JobOrder_ID))
+            {
+                return BadRequest("Select a valid saved Job Order.");
+            }
+            if (submission.Items is null || submission.Items.Count == 0)
+            {
+                return BadRequest("Add at least one Service Invoice item.");
+            }
+            for (var index = 0; index < submission.Items.Count; index++)
+            {
+                var item = submission.Items[index];
+                if (item.Quantity <= 0 || string.IsNullOrWhiteSpace(item.Unit) ||
+                    item.Unit.Length > 50 ||
+                    string.IsNullOrWhiteSpace(item.Description) ||
+                    item.Unit_Price < 0 || item.Amount < 0)
+                {
+                    return BadRequest($"Service Invoice item {index + 1} has invalid or missing values.");
+                }
+                if (decimal.Round(item.Quantity * item.Unit_Price, 2) != decimal.Round(item.Amount, 2))
+                {
+                    return BadRequest($"Service Invoice item {index + 1} amount does not match quantity times unit price.");
+                }
+            }
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync();
+            var invoice = new ServiceInvoice
+            {
+                JobOrder_ID = submission.JobOrder_ID,
+                Invoice_Date = submission.Invoice_Date == default
+                    ? DateOnly.FromDateTime(DateTime.Today)
+                    : submission.Invoice_Date,
+                Status = "Pending"
+            };
+            _Localdb.ServiceInvoice.Add(invoice);
+            await _Localdb.SaveChangesAsync();
+
+            var invoiceItems = submission.Items.Select(item => new ServiceInvoiceItem
+            {
+                ServiceInvoice_ID = invoice.ServiceInvoice_ID,
+                Quantity = item.Quantity,
+                Unit = item.Unit.Trim(),
+                Description = item.Description.Trim(),
+                Unit_Price = decimal.Round(item.Unit_Price, 2),
+                Amount = decimal.Round(item.Amount, 2)
+            });
+            _Localdb.ServiceInvoiceItems.AddRange(invoiceItems);
+            await _Localdb.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return Ok(invoice);
+        }
+
+        [HttpGet("GetLocalServiceInvoiceItems")]
+        public async Task<ActionResult<List<ServiceInvoiceItem>>> GetLocalServiceInvoiceItems()
+        {
+            return await _Localdb.ServiceInvoiceItems.AsNoTracking().ToListAsync();
+        }
+
+        [HttpPost("UpdateLocalServiceInvoiceItem")]
+        public async Task<ActionResult<ServiceInvoiceItem>> UpdateLocalServiceInvoiceItem(
+            int id,
+            [FromBody] ServiceInvoiceItem serviceInvoiceItem)
+        {
+            if (serviceInvoiceItem.Quantity <= 0 ||
+                string.IsNullOrWhiteSpace(serviceInvoiceItem.Unit) ||
+                serviceInvoiceItem.Unit.Length > 50 ||
+                string.IsNullOrWhiteSpace(serviceInvoiceItem.Description) ||
+                serviceInvoiceItem.Unit_Price < 0 ||
+                serviceInvoiceItem.Amount < 0 ||
+                decimal.Round(serviceInvoiceItem.Quantity * serviceInvoiceItem.Unit_Price, 2) !=
+                decimal.Round(serviceInvoiceItem.Amount, 2))
+            {
+                return BadRequest("The Service Invoice item has invalid or missing values.");
+            }
+
+            var existingItem = await _Localdb.ServiceInvoiceItems
+                .FirstOrDefaultAsync(item => item.ServiceInvoiceItem_ID == id);
+            if (existingItem is null)
+            {
+                return NotFound();
+            }
+
+            existingItem.Quantity = serviceInvoiceItem.Quantity;
+            existingItem.Unit = serviceInvoiceItem.Unit.Trim();
+            existingItem.Description = serviceInvoiceItem.Description.Trim();
+            existingItem.Unit_Price = decimal.Round(serviceInvoiceItem.Unit_Price, 2);
+            existingItem.Amount = decimal.Round(serviceInvoiceItem.Amount, 2);
+            await _Localdb.SaveChangesAsync();
+            return Ok(existingItem);
         }
 
         [HttpPost("UpdateLocalServiceInvoice")]
@@ -2146,7 +2348,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(serviceInvoice);
             }
-            var updateServiceInvoice = _Localdb.ServiceInvoice.FirstOrDefault(x => x.Quantity == Id);
+            var updateServiceInvoice = _Localdb.ServiceInvoice.FirstOrDefault(x => x.ServiceInvoice_ID == Id);
             if (updateServiceInvoice == null)
             {
                 return NotFound();
@@ -2159,13 +2361,31 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound("The selected Job Order was not found.");
             }
-            updateServiceInvoice.Quantity = serviceInvoice.Quantity;
             updateServiceInvoice.JobOrder_ID = serviceInvoice.JobOrder_ID;
-            updateServiceInvoice.Unit = serviceInvoice.Unit;
-            updateServiceInvoice.Description = serviceInvoice.Description;
-            updateServiceInvoice.Unit_Price = serviceInvoice.Unit_Price;
-            updateServiceInvoice.Amount = serviceInvoice.Amount;
-            updateServiceInvoice.Status = serviceInvoice.Status;
+            if (serviceInvoice.Invoice_Date != default)
+            {
+                updateServiceInvoice.Invoice_Date = serviceInvoice.Invoice_Date;
+            }
+            if (serviceInvoice.Unit is not null)
+            {
+                updateServiceInvoice.Unit = serviceInvoice.Unit;
+            }
+            if (serviceInvoice.Description is not null)
+            {
+                updateServiceInvoice.Description = serviceInvoice.Description;
+            }
+            if (serviceInvoice.Unit_Price.HasValue)
+            {
+                updateServiceInvoice.Unit_Price = serviceInvoice.Unit_Price;
+            }
+            if (serviceInvoice.Amount.HasValue)
+            {
+                updateServiceInvoice.Amount = serviceInvoice.Amount;
+            }
+            if (serviceInvoice.Status is not null)
+            {
+                updateServiceInvoice.Status = serviceInvoice.Status;
+            }
 
 
             _Localdb.SaveChanges();
@@ -2175,7 +2395,7 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPut ("DeleteLocalServiceInvoice")]
         public ActionResult DeleteLocalServiceInvoice(int id)
         {
-            var serviceInvoice = _Localdb.ServiceInvoice.FirstOrDefault(x => x.Quantity == id);
+            var serviceInvoice = _Localdb.ServiceInvoice.FirstOrDefault(x => x.ServiceInvoice_ID == id);
             if (serviceInvoice == null)
             {
                 return NotFound();
@@ -2198,7 +2418,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid service invoice ID.");
             }
-            var serviceInvoice = _CloudDb.ServiceInvoice.FirstOrDefault(x => x.Quantity == id);
+            var serviceInvoice = _CloudDb.ServiceInvoice.FirstOrDefault(x => x.ServiceInvoice_ID == id);
             if (serviceInvoice == null)
             {
                 return NotFound();
@@ -2221,6 +2441,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound("The selected Job Order was not found.");
             }
+            if (serviceInvoice.Invoice_Date == default)
+            {
+                serviceInvoice.Invoice_Date = DateOnly.FromDateTime(DateTime.Today);
+            }
             _CloudDb.ServiceInvoice.Add(serviceInvoice);
             _CloudDb.SaveChanges();
             return Ok(serviceInvoice);
@@ -2233,7 +2457,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(serviceInvoice);
             }
-            var updateServiceInvoice = _CloudDb.ServiceInvoice.FirstOrDefault(x => x.Quantity == Id);
+            var updateServiceInvoice = _CloudDb.ServiceInvoice.FirstOrDefault(x => x.ServiceInvoice_ID == Id);
             if (updateServiceInvoice == null)
             {
                 return NotFound();
@@ -2246,20 +2470,38 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound("The selected Job Order was not found.");
             }
-            updateServiceInvoice.Quantity = serviceInvoice.Quantity;
             updateServiceInvoice.JobOrder_ID = serviceInvoice.JobOrder_ID;
-            updateServiceInvoice.Unit = serviceInvoice.Unit;
-            updateServiceInvoice.Description = serviceInvoice.Description;
-            updateServiceInvoice.Unit_Price = serviceInvoice.Unit_Price;
-            updateServiceInvoice.Amount = serviceInvoice.Amount;
-            updateServiceInvoice.Status = serviceInvoice.Status;
+            if (serviceInvoice.Invoice_Date != default)
+            {
+                updateServiceInvoice.Invoice_Date = serviceInvoice.Invoice_Date;
+            }
+            if (serviceInvoice.Unit is not null)
+            {
+                updateServiceInvoice.Unit = serviceInvoice.Unit;
+            }
+            if (serviceInvoice.Description is not null)
+            {
+                updateServiceInvoice.Description = serviceInvoice.Description;
+            }
+            if (serviceInvoice.Unit_Price.HasValue)
+            {
+                updateServiceInvoice.Unit_Price = serviceInvoice.Unit_Price;
+            }
+            if (serviceInvoice.Amount.HasValue)
+            {
+                updateServiceInvoice.Amount = serviceInvoice.Amount;
+            }
+            if (serviceInvoice.Status is not null)
+            {
+                updateServiceInvoice.Status = serviceInvoice.Status;
+            }
             _CloudDb.SaveChanges();
             return Ok(updateServiceInvoice);
         }
         [HttpPut("DeleteCloudServiceInvoice")]
         public ActionResult DeleteCloudServiceInvoice(int id)
         {
-            var serviceInvoice = _CloudDb.ServiceInvoice.FirstOrDefault(x => x.Quantity == id);
+            var serviceInvoice = _CloudDb.ServiceInvoice.FirstOrDefault(x => x.ServiceInvoice_ID == id);
             if (serviceInvoice == null)
             {
                 return NotFound();
@@ -2267,6 +2509,120 @@ namespace APINIMIRHEMAA.Controllers
             _CloudDb.Remove(serviceInvoice);
             _CloudDb.SaveChanges();
             return NoContent();
+        }
+
+        [HttpGet("GetLocalServiceInvoiceFiles")]
+        public async Task<ActionResult<List<ServiceInvoiceFile>>> GetLocalServiceInvoiceFiles()
+        {
+            return await _Localdb.ServiceInvoiceFiles.AsNoTracking().ToListAsync();
+        }
+
+        [HttpPost("AddLocalServiceInvoiceFilesBatch")]
+        [RequestSizeLimit(100_000_000)]
+        public async Task<ActionResult<List<int>>> AddLocalServiceInvoiceFilesBatch(
+            [FromBody] List<ServiceInvoiceFile> files)
+        {
+            if (files == null || files.Count == 0)
+            {
+                return BadRequest("Select at least one Service Invoice file.");
+            }
+
+            for (var index = 0; index < files.Count; index++)
+            {
+                var file = files[index];
+                if (file.JobOrderID <= 0 ||
+                    !await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == file.JobOrderID))
+                {
+                    return BadRequest($"File {index + 1} must be linked to a saved Job Order.");
+                }
+
+                if (string.IsNullOrWhiteSpace(file.FileName) ||
+                    string.IsNullOrWhiteSpace(file.FileExtension) ||
+                    !string.Equals(
+                        Path.GetExtension(file.FileName),
+                        file.FileExtension,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest($"File {index + 1} has invalid file details.");
+                }
+
+                if (file.FileData is { Length: > 2_000_000 })
+                {
+                    return BadRequest($"File {index + 1} must not exceed 2 MB.");
+                }
+
+                var extension = file.FileExtension.ToLowerInvariant();
+                var validationError = extension == ".pdf"
+                    ? UploadValidator.ValidatePdf(file.FileData)
+                    : extension is ".jpg" or ".jpeg" or ".png"
+                        ? UploadValidator.ValidateImage(file.FileData)
+                        : "Only PDF, JPG, JPEG, and PNG files are supported.";
+                if (validationError != null)
+                {
+                    return BadRequest($"File {index + 1}: {validationError}");
+                }
+            }
+
+            _Localdb.ServiceInvoiceFiles.AddRange(files);
+            await _Localdb.SaveChangesAsync();
+            return Ok(files.Select(file => file.ServiceInvoiceFile_ID).ToList());
+        }
+
+        [HttpGet("GetCloudServiceInvoiceFiles")]
+        public async Task<ActionResult<List<ServiceInvoiceFile>>> GetCloudServiceInvoiceFiles()
+        {
+            return await _CloudDb.ServiceInvoiceFiles.AsNoTracking().ToListAsync();
+        }
+
+        [HttpPost("AddCloudServiceInvoiceFilesBatch")]
+        [RequestSizeLimit(100_000_000)]
+        public async Task<ActionResult<List<int>>> AddCloudServiceInvoiceFilesBatch(
+            [FromBody] List<ServiceInvoiceFile> files)
+        {
+            if (files == null || files.Count == 0)
+            {
+                return BadRequest("Select at least one Service Invoice file.");
+            }
+
+            for (var index = 0; index < files.Count; index++)
+            {
+                var file = files[index];
+                if (file.JobOrderID <= 0 ||
+                    !await _CloudDb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == file.JobOrderID))
+                {
+                    return BadRequest($"File {index + 1} must be linked to a saved Job Order.");
+                }
+
+                if (string.IsNullOrWhiteSpace(file.FileName) ||
+                    string.IsNullOrWhiteSpace(file.FileExtension) ||
+                    !string.Equals(
+                        Path.GetExtension(file.FileName),
+                        file.FileExtension,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest($"File {index + 1} has invalid file details.");
+                }
+
+                if (file.FileData is { Length: > 2_000_000 })
+                {
+                    return BadRequest($"File {index + 1} must not exceed 2 MB.");
+                }
+
+                var extension = file.FileExtension.ToLowerInvariant();
+                var validationError = extension == ".pdf"
+                    ? UploadValidator.ValidatePdf(file.FileData)
+                    : extension is ".jpg" or ".jpeg" or ".png"
+                        ? UploadValidator.ValidateImage(file.FileData)
+                        : "Only PDF, JPG, JPEG, and PNG files are supported.";
+                if (validationError != null)
+                {
+                    return BadRequest($"File {index + 1}: {validationError}");
+                }
+            }
+
+            _CloudDb.ServiceInvoiceFiles.AddRange(files);
+            await _CloudDb.SaveChangesAsync();
+            return Ok(files.Select(file => file.ServiceInvoiceFile_ID).ToList());
         }
 
         // ------------------------------- SERVICE INVOICE ---------------------------

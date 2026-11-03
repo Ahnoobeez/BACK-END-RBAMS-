@@ -32,6 +32,8 @@ namespace APINIMIRHEMAA.Data
         public DbSet<StockTransfer_Slip> StockTransfer_Slip { get; set; }
         public DbSet<Transmittal_Slip> Transmittal_Slip { get; set; }
         public DbSet<ServiceInvoice> ServiceInvoice { get; set; }
+        public DbSet<ServiceInvoiceItem> ServiceInvoiceItems { get; set; }
+        public DbSet<ServiceInvoiceFile> ServiceInvoiceFiles { get; set; }
         public DbSet<Users> Users { get; set; }
         public DbSet<Roles> Roles { get; set; }
         public DbSet<Departments> Departments { get; set; }
@@ -48,6 +50,45 @@ namespace APINIMIRHEMAA.Data
             });
             modelBuilder.Entity<ClientQuotationReservation>()
                 .ToTable("ClientQuotationReservation");
+            modelBuilder.Entity<ServiceInvoice>(entity =>
+            {
+                entity.Property(invoice => invoice.ServiceInvoice_ID)
+                    .HasDefaultValueSql("NEXT VALUE FOR dbo.ServiceInvoiceIdSequence");
+                entity.Property(invoice => invoice.Quantity)
+                    .ValueGeneratedOnAdd();
+            });
+            modelBuilder.Entity<ServiceInvoiceFile>(entity =>
+            {
+                entity.ToTable("ServiceInvoiceFiles");
+                entity.HasKey(file => file.ServiceInvoiceFile_ID);
+                entity.Property(file => file.FileData)
+                    .HasColumnType("varbinary(max)")
+                    .IsRequired();
+                entity.HasOne<JobOrder>()
+                    .WithMany()
+                    .HasForeignKey(file => file.JobOrderID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(file => file.JobOrderID);
+            });
+            modelBuilder.Entity<ServiceInvoiceItem>(entity =>
+            {
+                entity.ToTable("ServiceInvoiceItems");
+                entity.HasKey(item => item.ServiceInvoiceItem_ID);
+                entity.Property(item => item.Unit_Price).HasColumnType("decimal(18,2)");
+                entity.Property(item => item.Amount).HasColumnType("decimal(18,2)");
+                entity.HasOne<ServiceInvoice>()
+                    .WithMany()
+                    .HasForeignKey(item => item.ServiceInvoice_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(item => item.ServiceInvoice_ID);
+            });
+            modelBuilder.Entity<JobOrderItems>(entity =>
+            {
+                entity.HasOne<Quotation_Items>()
+                    .WithMany()
+                    .HasForeignKey(item => item.QI_ID)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
             modelBuilder.Entity<JobOrder>()
                 .Ignore(jobOrder => jobOrder.Comments);
         }

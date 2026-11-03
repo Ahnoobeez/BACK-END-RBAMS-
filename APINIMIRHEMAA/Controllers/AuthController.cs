@@ -23,17 +23,20 @@ namespace APINIMIRHEMAA.Controllers
         private readonly LocalDbContext _context;
         private readonly JwtService _jwtService;
         private readonly PasswordService _passwords;
+        private readonly AccessPermissionService _accessPermissions;
         private readonly IDataProtector _setupTokenProtector;
 
         public AuthController(
             LocalDbContext context,
             JwtService jwtService,
             PasswordService passwords,
+            AccessPermissionService accessPermissions,
             IDataProtectionProvider dataProtectionProvider)
         {
             _context = context;
             _jwtService = jwtService;
             _passwords = passwords;
+            _accessPermissions = accessPermissions;
             _setupTokenProtector = dataProtectionProvider.CreateProtector("APINIMIRHEMAA.SecurityQuestions.Setup");
         }
 
@@ -299,9 +302,9 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(new { message = "Enter and confirm your new password." });
             }
-            if (request.NewPassword.Length < 8)
+            if (!PasswordPolicy.IsValid(request.NewPassword))
             {
-                return BadRequest(new { message = "Your new password must be at least 8 characters long." });
+                return BadRequest(new { message = PasswordPolicy.RequirementMessage });
             }
             if (request.NewPassword != request.ConfirmNewPassword)
             {
@@ -381,7 +384,10 @@ namespace APINIMIRHEMAA.Controllers
 
             var token = _jwtService.GenerateToken(
                 user.User_ID, user.Username, role.Role_Name, department.Department_Name, employeeName);
-            var modules = ModuleAccess.GetModules(role.Role_Name, department.Department_Name);
+            var permissions = await _accessPermissions.GetEffectivePermissionsAsync(
+                user.User_ID, null, null);
+            var modules = AccessPermissionService.GetReadableModules(
+                permissions, role.Role_Name, department.Department_Name);
 
             return new
             {
@@ -407,8 +413,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(new { message = "Enter your current password and both new password fields." });
             }
-            if (request.NewPassword.Length < 8)
-                return BadRequest(new { message = "Your new password must be at least 8 characters long." });
+            if (!PasswordPolicy.IsValid(request.NewPassword))
+                return BadRequest(new { message = PasswordPolicy.RequirementMessage });
             if (request.NewPassword != request.ConfirmNewPassword)
                 return BadRequest(new { message = "The new passwords do not match." });
             if (request.NewPassword == request.CurrentPassword)

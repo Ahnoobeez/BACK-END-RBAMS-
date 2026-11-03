@@ -34,12 +34,15 @@ namespace APINIMIRHEMAA.Data
         public DbSet<StockTransfer_Slip> StockTransfer_Slip { get; set; }
         public DbSet<Transmittal_Slip> Transmittal_Slip { get; set; }
         public DbSet<ServiceInvoice> ServiceInvoice { get; set; }
+        public DbSet<ServiceInvoiceItem> ServiceInvoiceItems { get; set; }
+        public DbSet<ServiceInvoiceFile> ServiceInvoiceFiles { get; set; }
         public DbSet<Users> Users { get; set; }
         public DbSet<UserSignature> UserSignatures { get; set; }
         public DbSet<UserSecurityAnswer> UserSecurityAnswers { get; set; }
         public DbSet<PasswordRecoveryChallenge> PasswordRecoveryChallenges { get; set; }
         public DbSet<Roles> Roles { get; set; }
         public DbSet<Departments> Departments { get; set; }
+        public DbSet<AccessPermission> AccessPermissions { get; set; }
         public DbSet<Inventory> Inventory { get; set; }
         public DbSet<Purchased_Material> Purchased_Material { get; set; }
         public DbSet<Quotation_Items> Quotation_Items { get; set; }
@@ -59,6 +62,45 @@ namespace APINIMIRHEMAA.Data
             });
             modelBuilder.Entity<ClientQuotationReservation>()
                 .ToTable("ClientQuotationReservation");
+            modelBuilder.Entity<ServiceInvoice>(entity =>
+            {
+                entity.Property(invoice => invoice.ServiceInvoice_ID)
+                    .HasDefaultValueSql("NEXT VALUE FOR dbo.ServiceInvoiceIdSequence");
+                entity.Property(invoice => invoice.Quantity)
+                    .ValueGeneratedOnAdd();
+            });
+            modelBuilder.Entity<ServiceInvoiceFile>(entity =>
+            {
+                entity.ToTable("ServiceInvoiceFiles");
+                entity.HasKey(file => file.ServiceInvoiceFile_ID);
+                entity.Property(file => file.FileData)
+                    .HasColumnType("varbinary(max)")
+                    .IsRequired();
+                entity.HasOne<JobOrder>()
+                    .WithMany()
+                    .HasForeignKey(file => file.JobOrderID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(file => file.JobOrderID);
+            });
+            modelBuilder.Entity<ServiceInvoiceItem>(entity =>
+            {
+                entity.ToTable("ServiceInvoiceItems");
+                entity.HasKey(item => item.ServiceInvoiceItem_ID);
+                entity.Property(item => item.Unit_Price).HasColumnType("decimal(18,2)");
+                entity.Property(item => item.Amount).HasColumnType("decimal(18,2)");
+                entity.HasOne<ServiceInvoice>()
+                    .WithMany()
+                    .HasForeignKey(item => item.ServiceInvoice_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(item => item.ServiceInvoice_ID);
+            });
+            modelBuilder.Entity<JobOrderItems>(entity =>
+            {
+                entity.HasOne<Quotation_Items>()
+                    .WithMany()
+                    .HasForeignKey(item => item.QI_ID)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
             modelBuilder.Entity<JobOrderComment>(entity =>
             {
                 entity.ToTable("JobOrderComment");
@@ -75,6 +117,45 @@ namespace APINIMIRHEMAA.Data
                     .WithMany(jobOrder => jobOrder.Comments)
                     .HasForeignKey(comment => comment.JobOrder_ID)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+            modelBuilder.Entity<AccessPermission>(entity =>
+            {
+                entity.ToTable("AccessPermissions");
+                entity.HasKey(permission => permission.AccessPermission_ID);
+                entity.Property(permission => permission.ServiceKey)
+                    .HasMaxLength(80)
+                    .IsRequired();
+                entity.Property(permission => permission.ActionKey)
+                    .HasMaxLength(20)
+                    .IsRequired();
+                entity.HasOne<Roles>()
+                    .WithMany()
+                    .HasForeignKey(permission => permission.Role_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne<Departments>()
+                    .WithMany()
+                    .HasForeignKey(permission => permission.Department_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne<Users>()
+                    .WithMany()
+                    .HasForeignKey(permission => permission.User_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(permission => new
+                    { permission.Role_ID, permission.Department_ID, permission.ServiceKey, permission.ActionKey })
+                    .IsUnique()
+                    .HasFilter("[Role_ID] IS NOT NULL AND [Department_ID] IS NOT NULL AND [User_ID] IS NULL");
+                entity.HasIndex(permission => new
+                    { permission.Role_ID, permission.ServiceKey, permission.ActionKey })
+                    .IsUnique()
+                    .HasFilter("[Role_ID] IS NOT NULL AND [Department_ID] IS NULL AND [User_ID] IS NULL");
+                entity.HasIndex(permission => new
+                    { permission.Department_ID, permission.ServiceKey, permission.ActionKey })
+                    .IsUnique()
+                    .HasFilter("[Role_ID] IS NULL AND [Department_ID] IS NOT NULL AND [User_ID] IS NULL");
+                entity.HasIndex(permission => new
+                    { permission.User_ID, permission.ServiceKey, permission.ActionKey })
+                    .IsUnique()
+                    .HasFilter("[Role_ID] IS NULL AND [Department_ID] IS NULL AND [User_ID] IS NOT NULL");
             });
             modelBuilder.Entity<QuotationItemMaterial>(entity =>
             {

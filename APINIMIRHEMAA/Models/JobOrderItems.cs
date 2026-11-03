@@ -8,6 +8,7 @@ namespace APINIMIRHEMAA.Models
         [Key]
         public int JobOrderItems_ID { get; set; }
         public int JobOrder_ID { get; set; }
+        public int? QI_ID { get; set; }
         public string? Store { get; set; }
         public string? Requirements { get; set; }
         public string? Description { get; set; }

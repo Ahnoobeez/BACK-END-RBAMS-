@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
@@ -6,12 +7,17 @@ namespace APINIMIRHEMAA.Models
     {
         public string? CreatedBy { get; set; }
         [Key]
-        public int Quantity { get; set; }
+        public int ServiceInvoice_ID { get; set; }
         public int? JobOrder_ID { get; set; }
-        public int Unit { get; set; }
-        public string Description { get; set; }
-        public int Unit_Price { get; set; }
-        public int Amount { get; set; }
-        public string Status { get; set; }
+        public DateOnly Invoice_Date { get; set; }
+        public int? Quantity { get; set; }
+        public string? Unit { get; set; }
+        public string? Description { get; set; }
+        public decimal? Unit_Price { get; set; }
+        public decimal? Amount { get; set; }
+        public string? Status { get; set; }
+
+        [NotMapped]
+        public string Invoice_Number => $"SI-{ServiceInvoice_ID:D6}";
     }
 }

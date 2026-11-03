@@ -44,8 +44,10 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPost("AddLocalUsers")]
         public ActionResult AddLocalUsers([FromBody] CreateUserDto dto)
         {
-            if (string.IsNullOrWhiteSpace(dto.Username) || dto.Password.Length < 8)
-                return BadRequest("Username and a password of at least 8 characters are required.");
+            if (string.IsNullOrWhiteSpace(dto.Username))
+                return BadRequest("A username is required.");
+            if (!PasswordPolicy.IsValid(dto.Password))
+                return BadRequest(PasswordPolicy.RequirementMessage);
             if (_Localdb.Users.Any(u => u.Username == dto.Username))
                 return Conflict("That username already exists.");
 
@@ -159,9 +161,9 @@ namespace APINIMIRHEMAA.Controllers
             var target = _Localdb.Users.FirstOrDefault(u => u.User_ID == dto.TargetUserId);
             if (target == null) return NotFound();
 
-            target.PasswordHash = _passwords.Hash("mirhemaG123");
+            target.PasswordHash = _passwords.Hash(PasswordPolicy.DefaultResetPassword);
             _Localdb.SaveChanges();
-            return Ok(new { message = "Password reset to the default password." });
+            return Ok(new { message = $"Password reset to the default password: {PasswordPolicy.DefaultResetPassword}" });
         }
 
         [HttpGet("Me")]

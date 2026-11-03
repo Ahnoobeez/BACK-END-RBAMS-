@@ -168,6 +168,15 @@ namespace APINIMIRHEMAA.Controllers
                     .AsNoTracking()
                     .Where(record => record.JobOrder_ID.HasValue && jobOrderIds.Contains(record.JobOrder_ID.Value))
                     .ToListAsync();
+            var serviceInvoiceIds = serviceInvoices
+                .Select(record => record.ServiceInvoice_ID)
+                .ToList();
+            var serviceInvoiceItems = serviceInvoiceIds.Count == 0
+                ? new List<Models.ServiceInvoiceItem>()
+                : await _localDb.ServiceInvoiceItems
+                    .AsNoTracking()
+                    .Where(item => serviceInvoiceIds.Contains(item.ServiceInvoice_ID))
+                    .ToListAsync();
             var installationReports = jobOrderIds.Count == 0
                 ? new List<Models.InstallationReport>()
                 : await _localDb.InstallationReport
@@ -211,6 +220,7 @@ namespace APINIMIRHEMAA.Controllers
                 }).ToList(),
                 CollectionReceipts = collectionReceipts,
                 ServiceInvoices = serviceInvoices,
+                ServiceInvoiceItems = serviceInvoiceItems,
                 InstallationReports = installationReports,
                 QuotationStores = stores,
                 QuotationItems = quotationItems,

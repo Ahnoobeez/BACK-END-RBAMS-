@@ -5,13 +5,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
-using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+    options.Filters.AddService<AccessPermissionAuthorizationFilter>());
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -39,27 +39,19 @@ builder.Services.AddAuthorization(options =>
     foreach (var module in ModuleAccess.AllModules)
     {
         options.AddPolicy(module, policy =>
-            policy.RequireAssertion(ctx =>
-            {
-                var role = ctx.User.FindFirst(ClaimTypes.Role)?.Value ?? "";
-                var dept = ctx.User.FindFirst("Department")?.Value ?? "";
-                return ModuleAccess.CanAccess(role, dept, module);
-            }));
-        // Job orders: needed by Marketing, Technical, Production
-        options.AddPolicy("clients", policy =>
-            policy.RequireAssertion(ctx =>
-            {
-                var role = ctx.User.FindFirst(ClaimTypes.Role)?.Value ?? "";
-                var dept = ctx.User.FindFirst("Department")?.Value ?? "";
-                return new[] { "marketing", "technical", "production", "admin"}
-                    .Any(m => ModuleAccess.CanAccess(role, dept, m));
-            }));
+            policy.AddRequirements(new ModuleAccessRequirement(module)));
     }
+    options.AddPolicy("clients", policy =>
+        policy.AddRequirements(new ModuleAccessRequirement("clients")));
 });
 
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<WorkflowService>();
+builder.Services.AddScoped<AccessPermissionService>();
+builder.Services.AddScoped<AccessPermissionAuthorizationFilter>();
+builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
+    ModuleAccessAuthorizationHandler>();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
