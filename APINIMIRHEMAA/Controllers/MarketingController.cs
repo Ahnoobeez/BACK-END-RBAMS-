@@ -1153,6 +1153,55 @@ namespace APINIMIRHEMAA.Controllers
                 .ToList();
         }
 
+        [HttpGet("GetCompletedLocalJobOrders")]
+        public async Task<ActionResult<List<JobOrder>>> GetCompletedLocalJobOrders([FromQuery] string? recordType)
+        {
+            var jobOrders = await _Localdb.JobOrder
+                .AsNoTracking()
+                .Where(jobOrder =>
+                    jobOrder.Production_Completed ||
+                    jobOrder.Status == "Completed" ||
+                    jobOrder.Status == "Complete" ||
+                    jobOrder.Status == "complited")
+                .Include(jobOrder => jobOrder.Comments)
+                .OrderByDescending(jobOrder => jobOrder.JobOrder_ID)
+                .ToListAsync();
+
+            var existingJobOrderIds = new HashSet<int>();
+            switch (recordType?.Trim().ToLowerInvariant())
+            {
+                case null:
+                case "":
+                    break;
+                case "delivery-receipt":
+                    existingJobOrderIds.UnionWith(await _Localdb.DeliveryReceipt
+                        .AsNoTracking()
+                        .Where(receipt => receipt.JobOrderID.HasValue)
+                        .Select(receipt => receipt.JobOrderID!.Value)
+                        .ToListAsync());
+                    break;
+                case "collection-receipt":
+                    existingJobOrderIds.UnionWith(await _Localdb.CollectionReceipt
+                        .AsNoTracking()
+                        .Select(receipt => receipt.JobOrderID)
+                        .ToListAsync());
+                    break;
+                case "service-invoice":
+                    existingJobOrderIds.UnionWith(await _Localdb.ServiceInvoice
+                        .AsNoTracking()
+                        .Where(invoice => invoice.JobOrder_ID.HasValue)
+                        .Select(invoice => invoice.JobOrder_ID!.Value)
+                        .ToListAsync());
+                    break;
+                default:
+                    return BadRequest("A valid Job Order record type is required.");
+            }
+
+            return Ok(jobOrders
+                .Where(jobOrder => !existingJobOrderIds.Contains(jobOrder.JobOrder_ID))
+                .ToList());
+        }
+
         [HttpGet("GetLocalJobOrderItemsByJobOrderID")]
         public async Task<ActionResult<List<JobOrderItems>>> GetLocalJobOrderItemsByJobOrderID(int jobOrderId)
         {
@@ -1217,8 +1266,21 @@ namespace APINIMIRHEMAA.Controllers
         {
             var jobOrders = await _Localdb.JobOrder
                 .AsNoTracking()
+                .Where(jobOrder =>
+                    jobOrder.Production_Completed ||
+                    jobOrder.Status == "Completed" ||
+                    jobOrder.Status == "Complete" ||
+                    jobOrder.Status == "complited")
                 .OrderByDescending(jobOrder => jobOrder.JobOrder_ID)
                 .ToListAsync();
+            var existingReportJobOrderIds = await _Localdb.InstallationReport
+                .AsNoTracking()
+                .Select(report => report.JobOrder_ID)
+                .Distinct()
+                .ToListAsync();
+            jobOrders = jobOrders
+                .Where(jobOrder => !existingReportJobOrderIds.Contains(jobOrder.JobOrder_ID))
+                .ToList();
 
             if (jobOrders.Count == 0)
             {
@@ -1290,6 +1352,12 @@ namespace APINIMIRHEMAA.Controllers
             if (!jobOrderExists)
             {
                 return NotFound("The selected Job Order was not found.");
+            }
+            if (await _Localdb.InstallationReport
+                .AsNoTracking()
+                .AnyAsync(report => report.JobOrder_ID == request.JobOrderId))
+            {
+                return Conflict("An Installation Report already exists for the selected Job Order.");
             }
 
             var report = new InstallationReport
@@ -1424,13 +1492,15 @@ namespace APINIMIRHEMAA.Controllers
             {
                 Conforme_FileID = request.Conforme_FileID,
                 Title = request.Title,
-                Installation_Date = request.Installation_Date,
+                Installation_Date = null,
                 Target_Delivery = request.Target_Delivery,
-                Date_Delivered = request.Date_Delivered,
+                Date_Delivered = null,
                 Tiling = request.Tiling,
                 Eyelet = request.Eyelet,
                 Bleeding = request.Bleeding,
-                Status = request.Status
+                Status = "Pending",
+                Technical_Completed = false,
+                Production_Completed = false
             };
             if (!string.IsNullOrWhiteSpace(specialInstruction))
             {
@@ -1466,15 +1536,10 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             updateJobOrder.Title = _jobOrder.Title;
-            updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
-            updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
             updateJobOrder.Tiling = _jobOrder.Tiling;
             updateJobOrder.Eyelet = _jobOrder.Eyelet;
             updateJobOrder.Bleeding = _jobOrder.Bleeding;
-            updateJobOrder.Status = _jobOrder.Status;
-
-
             _Localdb.SaveChanges();
             return Ok(updateJobOrder);
         }
@@ -2237,6 +2302,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound("The selected Job Order was not found.");
             }
+            if (_Localdb.ServiceInvoice.Any(invoice => invoice.JobOrder_ID == serviceInvoice.JobOrder_ID))
+            {
+                return Conflict("A Service Invoice already exists for the selected Job Order.");
+            }
             if (serviceInvoice.Invoice_Date == default)
             {
                 serviceInvoice.Invoice_Date = DateOnly.FromDateTime(DateTime.Today);
@@ -2254,6 +2323,12 @@ namespace APINIMIRHEMAA.Controllers
                 !await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == submission.JobOrder_ID))
             {
                 return BadRequest("Select a valid saved Job Order.");
+            }
+            if (await _Localdb.ServiceInvoice
+                .AsNoTracking()
+                .AnyAsync(invoice => invoice.JobOrder_ID == submission.JobOrder_ID))
+            {
+                return Conflict("A Service Invoice already exists for the selected Job Order.");
             }
             if (submission.Items is null || submission.Items.Count == 0)
             {
@@ -2723,6 +2798,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            if (deliveryReceipt.JobOrderID is > 0 &&
+                _Localdb.DeliveryReceipt.Any(receipt => receipt.JobOrderID == deliveryReceipt.JobOrderID))
+            {
+                return Conflict("A Delivery Receipt already exists for the selected Job Order.");
+            }
             _Localdb.Add(deliveryReceipt);
             _Localdb.SaveChanges();
             return Ok(deliveryReceipt);
@@ -2949,6 +3029,35 @@ namespace APINIMIRHEMAA.Controllers
         {
             if (files == null || files.Count == 0) return BadRequest("No files.");
 
+            var receivedByDeliveryIds = files
+                .Where(file => string.Equals(file.File_Role?.Trim(), "ReceivedBy", StringComparison.OrdinalIgnoreCase))
+                .Select(file => file.Delivery_ID)
+                .Distinct()
+                .ToArray();
+            var deliveryReceipts = _Localdb.DeliveryReceipt
+                .Where(receipt => receivedByDeliveryIds.Contains(receipt.Delivery_ID))
+                .ToDictionary(receipt => receipt.Delivery_ID);
+            if (deliveryReceipts.Count != receivedByDeliveryIds.Length)
+            {
+                return BadRequest("A Received By file must be linked to a saved Delivery Receipt.");
+            }
+            if (deliveryReceipts.Values.Any(receipt => receipt.JobOrderID is not > 0))
+            {
+                return BadRequest("The Delivery Receipt must be linked to a valid Job Order.");
+            }
+
+            var deliveredJobOrderIds = deliveryReceipts.Values
+                .Select(receipt => receipt.JobOrderID.GetValueOrDefault())
+                .Distinct()
+                .ToArray();
+            var deliveredJobOrders = _Localdb.JobOrder
+                .Where(jobOrder => deliveredJobOrderIds.Contains(jobOrder.JobOrder_ID))
+                .ToDictionary(jobOrder => jobOrder.JobOrder_ID);
+            if (deliveredJobOrders.Count != deliveredJobOrderIds.Length)
+            {
+                return BadRequest("The Delivery Receipt is linked to a missing Job Order.");
+            }
+
             for (int i = 0; i < files.Count; i++)
             {
                 var error = UploadValidator.ValidateImage(files[i].File_Data);
@@ -2959,6 +3068,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 f.File_Data = _encryptionService.Encrypt(f.File_Data);
                 _Localdb.DeliveryFiles.Add(f);
+            }
+            foreach (var deliveryReceipt in deliveryReceipts.Values)
+            {
+                var jobOrder = deliveredJobOrders[deliveryReceipt.JobOrderID.GetValueOrDefault()];
+                jobOrder.Date_Delivered = DateOnly.FromDateTime(DateTime.Now);
             }
             _Localdb.SaveChanges();
             return Ok(files.Select(f => f.File_ID).ToList());
@@ -3094,6 +3208,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            if (_Localdb.CollectionReceipt.Any(receipt => receipt.JobOrderID == collectionReceipt.JobOrderID))
+            {
+                return Conflict("A Collection Receipt already exists for the selected Job Order.");
+            }
             _Localdb.Add(collectionReceipt);
             _Localdb.SaveChanges();
             return Ok(collectionReceipt);
@@ -3104,6 +3222,11 @@ namespace APINIMIRHEMAA.Controllers
         public ActionResult<List<int>> AddLocalCollectionReceiptBatch([FromBody] List<CollectionReceipt> collectionReceiptsFiles)
         {
             if (collectionReceiptsFiles == null || collectionReceiptsFiles.Count == 0) return BadRequest("No files.");
+            var jobOrderIds = collectionReceiptsFiles.Select(receipt => receipt.JobOrderID).Distinct().ToList();
+            if (_Localdb.CollectionReceipt.Any(receipt => jobOrderIds.Contains(receipt.JobOrderID)))
+            {
+                return Conflict("A Collection Receipt already exists for the selected Job Order.");
+            }
             for (int i = 0; i < collectionReceiptsFiles.Count; i++)
 
             {

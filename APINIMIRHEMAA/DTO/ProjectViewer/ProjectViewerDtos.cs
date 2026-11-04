@@ -21,6 +21,7 @@ namespace APINIMIRHEMAA.DTO.ProjectViewer
         public List<CollectionReceipt> CollectionReceipts { get; init; } = new();
         public List<APINIMIRHEMAA.Models.ServiceInvoice> ServiceInvoices { get; init; } = new();
         public List<ServiceInvoiceItem> ServiceInvoiceItems { get; init; } = new();
+        public List<ServiceInvoiceFile> ServiceInvoiceFiles { get; init; } = new();
         public List<InstallationReportModel> InstallationReports { get; init; } = new();
         public List<Quotation_Store> QuotationStores { get; init; } = new();
         public List<Quotation_Items> QuotationItems { get; init; } = new();

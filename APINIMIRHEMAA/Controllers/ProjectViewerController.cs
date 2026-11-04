@@ -156,6 +156,10 @@ namespace APINIMIRHEMAA.Controllers
                     .AsNoTracking()
                     .Where(file => deliveryIds.Contains(file.Delivery_ID))
                     .ToListAsync();
+            foreach (var deliveryFile in deliveryFiles)
+            {
+                deliveryFile.File_Data = _encryptionService.TryDecrypt(deliveryFile.File_Data);
+            }
             var collectionReceipts = jobOrderIds.Count == 0
                 ? new List<Models.CollectionReceipt>()
                 : await _localDb.CollectionReceipt
@@ -168,8 +172,14 @@ namespace APINIMIRHEMAA.Controllers
                     .AsNoTracking()
                     .Where(record => record.JobOrder_ID.HasValue && jobOrderIds.Contains(record.JobOrder_ID.Value))
                     .ToListAsync();
+            var serviceInvoiceFiles = jobOrderIds.Count == 0
+                    ? new List<Models.ServiceInvoiceFile>()
+                    : await _localDb.ServiceInvoiceFiles
+                        .AsNoTracking()
+                        .Where(file => jobOrderIds.Contains(file.JobOrderID))
+                        .ToListAsync();
             var serviceInvoiceIds = serviceInvoices
-                .Select(record => record.ServiceInvoice_ID)
+                    .Select(record => record.ServiceInvoice_ID)
                 .ToList();
             var serviceInvoiceItems = serviceInvoiceIds.Count == 0
                 ? new List<Models.ServiceInvoiceItem>()
@@ -221,6 +231,7 @@ namespace APINIMIRHEMAA.Controllers
                 CollectionReceipts = collectionReceipts,
                 ServiceInvoices = serviceInvoices,
                 ServiceInvoiceItems = serviceInvoiceItems,
+                ServiceInvoiceFiles = serviceInvoiceFiles,
                 InstallationReports = installationReports,
                 QuotationStores = stores,
                 QuotationItems = quotationItems,

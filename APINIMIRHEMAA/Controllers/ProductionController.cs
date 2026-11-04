@@ -26,12 +26,30 @@ namespace APINIMIRHEMAA.Controllers
             _encryptionService = encryptionService;
         }
 
+        private int? GetProductionDepartmentId()
+        {
+            return _Localdb.Departments
+                .AsNoTracking()
+                .Where(department => department.Department_Name.Trim().ToLower() == "production")
+                .Select(department => (int?)department.Department_ID)
+                .FirstOrDefault();
+        }
+
+        private static bool IsCompletedJobOrder(JobOrder jobOrder)
+        {
+            return jobOrder.Production_Completed ||
+                string.Equals(jobOrder.Status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(jobOrder.Status, "Complete", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(jobOrder.Status, "Complited", StringComparison.OrdinalIgnoreCase);
+        }
+
         // ----------------------------------- JOB ORDER -----------------------------------
         [HttpGet("GetLocalJobOrder")]
         public List<JobOrder> GetAllJobOrder()
         {
             return _Localdb.JobOrder
                 .AsNoTracking()
+                .Where(jobOrder => jobOrder.Technical_Completed || jobOrder.Status == "Completed")
                 .Include(jobOrder => jobOrder.Comments)
                 .ToList();
         }
@@ -139,10 +157,14 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var updatedRows = await _Localdb.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE [dbo].[JobOrder] SET [Production_Completed] = 1, [Status] = CASE WHEN [Technical_Completed] = 1 THEN N'Completed' ELSE N'In Progress' END WHERE [JobOrder_ID] = {jobOrderId}");
+                $"UPDATE [dbo].[JobOrder] SET [Production_Completed] = 1, [Status] = N'Completed' WHERE [JobOrder_ID] = {jobOrderId} AND [Technical_Completed] = 1 AND ([Production_Completed] = 1 OR [Status] = N'In Progress (1/2)' OR [Status] = N'Completed')");
             if (updatedRows == 0)
             {
-                return NotFound("Job Order not found.");
+                if (!await _Localdb.JobOrder.AnyAsync(record => record.JobOrder_ID == jobOrderId))
+                {
+                    return NotFound("Job Order not found.");
+                }
+                return Conflict("This Job Order is available to Production after Technical completes it.");
             }
 
             var jobOrder = await _Localdb.JobOrder
@@ -164,9 +186,7 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
-            updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
-            updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
 
 
             _Localdb.SaveChanges();
@@ -425,13 +445,19 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid job order, date, and mall-hours group are required.");
             }
-            if (!_Localdb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
+            var jobOrder = _Localdb.JobOrder.FirstOrDefault(record => record.JobOrder_ID == installationSchedule.JobOrder_ID);
+            if (jobOrder == null)
             {
                 return BadRequest("The selected Job Order was not found.");
+            }
+            if (!IsCompletedJobOrder(jobOrder))
+            {
+                return BadRequest("Only completed Job Orders can be added to the Installation Schedule.");
             }
 
             installationSchedule.Installation_ID = 0;
             _Localdb.Installation_Schedule.Add(installationSchedule);
+            jobOrder.Installation_Date = installationSchedule.Date;
             _Localdb.SaveChanges();
             return Ok(installationSchedule);
         }
@@ -446,22 +472,43 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid schedule row, job order, date, and mall-hours group are required.");
             }
-            if (!_Localdb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
-            {
-                return BadRequest("The selected Job Order was not found.");
-            }
-
             var existingSchedule = _Localdb.Installation_Schedule.FirstOrDefault(schedule => schedule.Installation_ID == Id);
             if (existingSchedule == null)
             {
                 return NotFound();
             }
 
+            var jobOrder = _Localdb.JobOrder.FirstOrDefault(record => record.JobOrder_ID == installationSchedule.JobOrder_ID);
+            if (jobOrder == null)
+            {
+                return BadRequest("The selected Job Order was not found.");
+            }
+            if (!IsCompletedJobOrder(jobOrder))
+            {
+                return BadRequest("Only completed Job Orders can be added to the Installation Schedule.");
+            }
+
+            var previousJobOrderId = existingSchedule.JobOrder_ID;
             existingSchedule.Time = installationSchedule.Time;
             existingSchedule.Remarks = installationSchedule.Remarks;
             existingSchedule.Mall_Hours = installationSchedule.Mall_Hours;
             existingSchedule.Date = installationSchedule.Date;
             existingSchedule.JobOrder_ID = installationSchedule.JobOrder_ID;
+            jobOrder.Installation_Date = installationSchedule.Date;
+
+            if (previousJobOrderId != installationSchedule.JobOrder_ID)
+            {
+                var previousJobOrder = _Localdb.JobOrder.FirstOrDefault(record => record.JobOrder_ID == previousJobOrderId);
+                if (previousJobOrder != null)
+                {
+                    previousJobOrder.Installation_Date = _Localdb.Installation_Schedule
+                        .Where(schedule => schedule.JobOrder_ID == previousJobOrderId && schedule.Installation_ID != Id)
+                        .OrderBy(schedule => schedule.Installation_ID)
+                        .Select(schedule => (DateOnly?)schedule.Date)
+                        .FirstOrDefault();
+                }
+            }
+
             _Localdb.SaveChanges();
             return Ok(existingSchedule);
         }
@@ -474,6 +521,9 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("A valid schedule row is required.");
             }
 
+            var scheduleToDelete = await _Localdb.Installation_Schedule
+                .AsNoTracking()
+                .FirstOrDefaultAsync(schedule => schedule.Installation_ID == id);
             await using var transaction = await _Localdb.Database.BeginTransactionAsync();
             await _Localdb.Installation_Schedule_Employee
                 .Where(assignment => assignment.Installation_ID == id)
@@ -486,6 +536,20 @@ namespace APINIMIRHEMAA.Controllers
             {
                 await transaction.CommitAsync();
                 return NoContent();
+            }
+
+            if (scheduleToDelete != null)
+            {
+                var jobOrder = await _Localdb.JobOrder
+                    .FirstOrDefaultAsync(record => record.JobOrder_ID == scheduleToDelete.JobOrder_ID);
+                if (jobOrder != null)
+                {
+                    jobOrder.Installation_Date = await _Localdb.Installation_Schedule
+                        .Where(schedule => schedule.JobOrder_ID == scheduleToDelete.JobOrder_ID)
+                        .OrderBy(schedule => schedule.Installation_ID)
+                        .Select(schedule => (DateOnly?)schedule.Date)
+                        .FirstOrDefaultAsync();
+                }
             }
 
             var now = DateTime.Now;
@@ -505,9 +569,17 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalInstallationScheduleEmployees")]
         public ActionResult<List<InstallationScheduleEmployeeOptionDto>> GetLocalInstallationScheduleEmployees()
         {
+            var productionDepartmentId = GetProductionDepartmentId();
+            if (!productionDepartmentId.HasValue)
+            {
+                return BadRequest("The Production department is not configured.");
+            }
+
             var employees = _Localdb.Employee
                 .AsNoTracking()
-                .Where(employee => employee.Date_Resigned == null)
+                .Where(employee =>
+                    employee.Date_Resigned == null &&
+                    employee.Department_ID == productionDepartmentId.Value)
                 .OrderBy(employee => employee.LastName)
                 .ThenBy(employee => employee.FirstName)
                 .Select(employee => new InstallationScheduleEmployeeOptionDto
@@ -555,11 +627,19 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound("The selected installation schedule row was not found.");
             }
 
+            var productionDepartmentId = GetProductionDepartmentId();
+            if (!productionDepartmentId.HasValue)
+            {
+                return BadRequest("The Production department is not configured.");
+            }
+
             var employee = _Localdb.Employee.FirstOrDefault(candidate =>
-                candidate.Employee_Id == request.Employee_Id && candidate.Date_Resigned == null);
+                candidate.Employee_Id == request.Employee_Id &&
+                candidate.Date_Resigned == null &&
+                candidate.Department_ID == productionDepartmentId.Value);
             if (employee == null)
             {
-                return NotFound("The selected active employee was not found.");
+                return NotFound("The selected active Production employee was not found.");
             }
 
             if (_Localdb.Installation_Schedule_Employee.Any(assignment =>

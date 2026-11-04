@@ -7,18 +7,18 @@ namespace APINIMIRHEMAA.Services
         private readonly LocalDbContext _db;
         public WorkflowService(LocalDbContext db) { _db = db; }
 
-        // Job Order: both receipts = Completed, one = InProgress, none = Pending
         public void RefreshJobOrderStatus(int jobOrderId)
         {
             var job = _db.JobOrder.FirstOrDefault(j => j.JobOrder_ID == jobOrderId);
             if (job == null) return;
 
-            var hasDelivery = _db.DeliveryReceipt.Any(d => d.JobOrderID == jobOrderId);
-            var hasCollection = _db.CollectionReceipt.Any(c => c.JobOrderID == jobOrderId);
-
-            job.Status = hasDelivery && hasCollection ? "Completed"
-                       : hasDelivery || hasCollection ? "InProgress"
-                       : "Pending";
+            job.Status = job.Production_Completed
+                ? "Completed"
+                : job.Technical_Completed
+                    ? "In Progress (1/2)"
+                    : string.Equals(job.Status, "In Progress (0/2)", StringComparison.OrdinalIgnoreCase)
+                        ? "In Progress (0/2)"
+                        : "Pending";
             _db.SaveChanges();
         }
 

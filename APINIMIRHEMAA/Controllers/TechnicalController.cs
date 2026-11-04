@@ -33,6 +33,28 @@ namespace APINIMIRHEMAA.Controllers
                 .ToList();
         }
 
+        [HttpPost("StartLocalJobOrder")]
+        public async Task<ActionResult<JobOrder>> StartLocalJobOrder(int jobOrderId)
+        {
+            if (jobOrderId <= 0)
+            {
+                return BadRequest("A valid Job Order ID is required.");
+            }
+
+            var updatedRows = await _Localdb.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE [dbo].[JobOrder] SET [Status] = CASE WHEN [Production_Completed] = 1 OR [Status] = N'Completed' THEN N'Completed' WHEN [Technical_Completed] = 1 THEN N'In Progress (1/2)' ELSE N'In Progress (0/2)' END WHERE [JobOrder_ID] = {jobOrderId}");
+            if (updatedRows == 0)
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var jobOrder = await _Localdb.JobOrder
+                .AsNoTracking()
+                .Include(record => record.Comments)
+                .FirstAsync(record => record.JobOrder_ID == jobOrderId);
+            return Ok(jobOrder);
+        }
+
         [HttpGet("GetLocalJobOrderItemsByJobOrderID")]
         public async Task<ActionResult<List<JobOrderItems>>> GetLocalJobOrderItemsByJobOrderID(int jobOrderId)
         {
@@ -136,10 +158,14 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var updatedRows = await _Localdb.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE [dbo].[JobOrder] SET [Technical_Completed] = 1, [Status] = CASE WHEN [Production_Completed] = 1 THEN N'Completed' ELSE N'In Progress' END WHERE [JobOrder_ID] = {jobOrderId}");
+                $"UPDATE [dbo].[JobOrder] SET [Technical_Completed] = 1, [Status] = CASE WHEN [Production_Completed] = 1 THEN N'Completed' ELSE N'In Progress (1/2)' END WHERE [JobOrder_ID] = {jobOrderId} AND ([Technical_Completed] = 1 OR [Status] = N'In Progress (0/2)')");
             if (updatedRows == 0)
             {
-                return NotFound("Job Order not found.");
+                if (!await _Localdb.JobOrder.AnyAsync(record => record.JobOrder_ID == jobOrderId))
+                {
+                    return NotFound("Job Order not found.");
+                }
+                return Conflict("Open the Job Order before marking Technical work complete.");
             }
 
             var jobOrder = await _Localdb.JobOrder
@@ -160,9 +186,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateJobOrder.Installation_Date = _jobOrder.Installation_Date;
             updateJobOrder.Target_Delivery = _jobOrder.Target_Delivery;
-            updateJobOrder.Date_Delivered = _jobOrder.Date_Delivered;
 
 
             _Localdb.SaveChanges();
