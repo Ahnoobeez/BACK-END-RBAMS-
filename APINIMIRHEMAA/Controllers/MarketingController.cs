@@ -97,7 +97,9 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpGet("PreviewLocalClientQuotationSubject")]
-        public async Task<ActionResult> PreviewLocalClientQuotationSubject([FromQuery] int clientId)
+        public async Task<ActionResult> PreviewLocalClientQuotationSubject(
+            [FromQuery] int clientId,
+            [FromQuery] int? sourceQuotationId)
         {
             if (clientId <= 0)
             {
@@ -106,6 +108,36 @@ namespace APINIMIRHEMAA.Controllers
             if (!await _Localdb.Clients.AsNoTracking().AnyAsync(record => record.Client_ID == clientId))
             {
                 return BadRequest($"Client {clientId} was not found.");
+            }
+
+            if (sourceQuotationId.HasValue)
+            {
+                if (sourceQuotationId.Value <= 0)
+                {
+                    return BadRequest("A valid source quotation ID is required.");
+                }
+
+                var sourceQuotation = await _Localdb.Quotation
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(record =>
+                        record.Quotation_ID == sourceQuotationId.Value &&
+                        record.Client_ID == clientId);
+                if (sourceQuotation == null)
+                {
+                    return NotFound("The source quotation was not found for the selected client.");
+                }
+
+                var sourceSubject = ReadClientSubject(sourceQuotation.Client_Subject);
+                if (string.IsNullOrWhiteSpace(sourceSubject))
+                {
+                    return StatusCode(
+                        StatusCodes.Status500InternalServerError,
+                        "The source quotation Client Subject could not be read.");
+                }
+
+                var (baseSubject, _) = SplitQuotationSubjectVersion(sourceSubject);
+                var nextVersion = await GetNextQuotationRevisionNumberAsync(clientId, baseSubject);
+                return Ok(new { clientSubject = $"{baseSubject}.{nextVersion}" });
             }
 
             var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
@@ -171,9 +203,50 @@ namespace APINIMIRHEMAA.Controllers
             var employeeName = _Localdb.GetCurrentEmployeeName().Trim();
             var now = DateTime.Now;
             await using var transaction = await _Localdb.Database.BeginTransactionAsync(IsolationLevel.Serializable);
-            ClientQuotationReservation reservation;
+            ClientQuotationReservation? reservation = null;
+            Quotation? revisionSource = null;
             string clientSubject;
-            if (QuotationDetails.Client_SubjectReservation_ID.HasValue)
+            if (QuotationDetails.RevisionOfQuotation_ID.HasValue)
+            {
+                if (QuotationDetails.Client_SubjectReservation_ID.HasValue)
+                {
+                    return BadRequest("A quotation revision cannot use a new Client Subject reservation.");
+                }
+
+                var sourceQuotationId = QuotationDetails.RevisionOfQuotation_ID.Value;
+                if (sourceQuotationId <= 0)
+                {
+                    return BadRequest("A valid source quotation ID is required for a revision.");
+                }
+
+                revisionSource = await _Localdb.Quotation.FirstOrDefaultAsync(record =>
+                    record.Quotation_ID == sourceQuotationId &&
+                    record.Client_ID == QuotationDetails.Client_ID);
+                if (revisionSource == null)
+                {
+                    return NotFound("The source quotation was not found for the selected client.");
+                }
+
+                var sourceSubject = ReadClientSubject(revisionSource.Client_Subject);
+                if (string.IsNullOrWhiteSpace(sourceSubject))
+                {
+                    return StatusCode(
+                        StatusCodes.Status500InternalServerError,
+                        "The source quotation Client Subject could not be read.");
+                }
+
+                var (baseSubject, sourceVersion) = SplitQuotationSubjectVersion(sourceSubject);
+                var nextVersion = await GetNextQuotationRevisionNumberAsync(
+                    QuotationDetails.Client_ID,
+                    baseSubject);
+                if (!sourceVersion.HasValue)
+                {
+                    revisionSource.Client_Subject = _encryptionService.Encrypt($"{baseSubject}.1");
+                }
+                QuotationDetails.Start_Date = revisionSource.Start_Date;
+                clientSubject = $"{baseSubject}.{nextVersion}";
+            }
+            else if (QuotationDetails.Client_SubjectReservation_ID.HasValue)
             {
                 reservation = await _Localdb.ClientQuotationReservations.FirstOrDefaultAsync(record =>
                     record.Reservation_ID == QuotationDetails.Client_SubjectReservation_ID.Value &&
@@ -217,13 +290,20 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             QuotationDetails.Client_Subject = _encryptionService.Encrypt(clientSubject);
-            QuotationDetails.Start_Date = DateOnly.FromDateTime(now);
+            if (revisionSource == null)
+            {
+                QuotationDetails.Start_Date = DateOnly.FromDateTime(now);
+            }
             QuotationDetails.Time = TimeOnly.FromDateTime(now);
-            reservation.IsUsed = true;
+            if (reservation != null)
+            {
+                reservation.IsUsed = true;
+            }
             _Localdb.Quotation.Add(QuotationDetails);
             await _Localdb.SaveChangesAsync();
             await transaction.CommitAsync();
             _Localdb.Entry(QuotationDetails).State = EntityState.Detached;
+            QuotationDetails.RevisionOfQuotation_ID = null;
             QuotationDetails.Client_Subject = clientSubject;
             return Ok(QuotationDetails);
         }
@@ -295,6 +375,10 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             quotation.Status = Status.Trim();
+            if (string.Equals(quotation.Status, "Rejected", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureRejectedQuotationHasVersion(quotation);
+            }
             await _Localdb.SaveChangesAsync();
             return Ok(new { quotation.Quotation_ID, quotation.Status });
         }
@@ -332,6 +416,7 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             quotation.Status = "Rejected";
+            EnsureRejectedQuotationHasVersion(quotation);
             await _Localdb.SaveChangesAsync();
             return Ok(new { quotation.Quotation_ID, quotation.Status });
         }
@@ -632,6 +717,57 @@ namespace APINIMIRHEMAA.Controllers
             return storedSubject.StartsWith("CfDJ8", StringComparison.Ordinal)
                 ? _encryptionService.TryDecrypt(storedSubject)
                 : storedSubject;
+        }
+
+        private async Task<int> GetNextQuotationRevisionNumberAsync(int clientId, string baseSubject)
+        {
+            var storedSubjects = await _Localdb.Quotation
+                .AsNoTracking()
+                .Where(record => record.Client_ID == clientId)
+                .Select(record => record.Client_Subject)
+                .ToListAsync();
+            var latestVersion = 1;
+            foreach (var storedSubject in storedSubjects)
+            {
+                var subject = ReadClientSubject(storedSubject);
+                var (candidateBaseSubject, version) = SplitQuotationSubjectVersion(subject);
+                if (version.HasValue &&
+                    string.Equals(candidateBaseSubject, baseSubject, StringComparison.OrdinalIgnoreCase))
+                {
+                    latestVersion = Math.Max(latestVersion, version.Value);
+                }
+            }
+
+            return checked(latestVersion + 1);
+        }
+
+        private static (string BaseSubject, int? Version) SplitQuotationSubjectVersion(string subject)
+        {
+            var normalizedSubject = subject.Trim();
+            var separator = normalizedSubject.LastIndexOf('.');
+            if (separator > 0 &&
+                int.TryParse(normalizedSubject[(separator + 1)..], out var version) &&
+                version > 0)
+            {
+                return (normalizedSubject[..separator], version);
+            }
+
+            return (normalizedSubject, null);
+        }
+
+        private void EnsureRejectedQuotationHasVersion(Quotation quotation)
+        {
+            var subject = ReadClientSubject(quotation.Client_Subject);
+            if (string.IsNullOrWhiteSpace(subject))
+            {
+                return;
+            }
+
+            var (baseSubject, version) = SplitQuotationSubjectVersion(subject);
+            if (!version.HasValue)
+            {
+                quotation.Client_Subject = _encryptionService.Encrypt($"{baseSubject}.1");
+            }
         }
 
         [HttpPost("UpdateCloudQuotations")]
@@ -2306,6 +2442,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return Conflict("A Service Invoice already exists for the selected Job Order.");
             }
+            serviceInvoice.Status = "Completed";
             if (serviceInvoice.Invoice_Date == default)
             {
                 serviceInvoice.Invoice_Date = DateOnly.FromDateTime(DateTime.Today);
@@ -2357,7 +2494,7 @@ namespace APINIMIRHEMAA.Controllers
                 Invoice_Date = submission.Invoice_Date == default
                     ? DateOnly.FromDateTime(DateTime.Today)
                     : submission.Invoice_Date,
-                Status = "Pending"
+                Status = "Completed"
             };
             _Localdb.ServiceInvoice.Add(invoice);
             await _Localdb.SaveChangesAsync();
@@ -2803,6 +2940,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return Conflict("A Delivery Receipt already exists for the selected Job Order.");
             }
+            deliveryReceipt.Status = "Completed";
             _Localdb.Add(deliveryReceipt);
             _Localdb.SaveChanges();
             return Ok(deliveryReceipt);
@@ -3212,6 +3350,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return Conflict("A Collection Receipt already exists for the selected Job Order.");
             }
+            collectionReceipt.Status = "Completed";
             _Localdb.Add(collectionReceipt);
             _Localdb.SaveChanges();
             return Ok(collectionReceipt);
@@ -3232,6 +3371,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 var error = UploadValidator.ValidateImage(collectionReceiptsFiles[i].FileData);
                 if (error != null) return BadRequest($"File {i + 1}: {error}");
+                collectionReceiptsFiles[i].Status = "Completed";
             }
 
             _Localdb.CollectionReceipt.AddRange(collectionReceiptsFiles);

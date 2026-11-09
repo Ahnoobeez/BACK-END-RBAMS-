@@ -69,6 +69,90 @@ namespace APINIMIRHEMAA.Controllers
             return _Localdb.Employee.ToList();
         }
 
+        [HttpPost("AddLocalEmployee")]
+        public async Task<ActionResult<Employee>> AddLocalEmployee(
+            [FromBody] Employee? employee,
+            CancellationToken cancellationToken)
+        {
+            if (employee == null)
+            {
+                return BadRequest(new { message = "Employee details are required." });
+            }
+
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            if (employee.Employee_Id < 0)
+            {
+                return BadRequest(new { message = "Employee ID cannot be negative." });
+            }
+
+            if (string.IsNullOrWhiteSpace(employee.FirstName) ||
+                string.IsNullOrWhiteSpace(employee.LastName) ||
+                string.IsNullOrWhiteSpace(employee.status))
+            {
+                return BadRequest(new { message = "First name, last name, and status are required." });
+            }
+
+            if (!employee.Department_ID.HasValue ||
+                !await _Localdb.Departments.AnyAsync(
+                    department => department.Department_ID == employee.Department_ID.Value,
+                    cancellationToken))
+            {
+                return BadRequest(new { message = "Select a valid department." });
+            }
+
+            if (!employee.Role_ID.HasValue ||
+                !await _Localdb.Roles.AnyAsync(
+                    role => role.Role_ID == employee.Role_ID.Value,
+                    cancellationToken))
+            {
+                return BadRequest(new { message = "Select a valid role." });
+            }
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            if (employee.Employee_Id == 0)
+            {
+                var lastEmployeeId = await _Localdb.Employee
+                    .MaxAsync(record => (int?)record.Employee_Id, cancellationToken) ?? 0;
+                employee.Employee_Id = checked(lastEmployeeId + 1);
+            }
+            else if (await _Localdb.Employee.AnyAsync(
+                         record => record.Employee_Id == employee.Employee_Id,
+                         cancellationToken))
+            {
+                return Conflict(new { message = $"Employee ID {employee.Employee_Id} is already in use." });
+            }
+
+            employee.FirstName = employee.FirstName.Trim();
+            employee.LastName = employee.LastName.Trim();
+            employee.MiddleName = string.IsNullOrWhiteSpace(employee.MiddleName)
+                ? null
+                : employee.MiddleName.Trim();
+            employee.status = employee.status.Trim();
+            employee.ContactNumber = string.IsNullOrWhiteSpace(employee.ContactNumber)
+                ? null
+                : employee.ContactNumber.Trim();
+            employee.SSS_Number = string.IsNullOrWhiteSpace(employee.SSS_Number)
+                ? null
+                : employee.SSS_Number.Trim();
+            employee.Philhealth_Number = string.IsNullOrWhiteSpace(employee.Philhealth_Number)
+                ? null
+                : employee.Philhealth_Number.Trim();
+            employee.Pagibig_Number = string.IsNullOrWhiteSpace(employee.Pagibig_Number)
+                ? null
+                : employee.Pagibig_Number.Trim();
+
+            _Localdb.Employee.Add(employee);
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return Ok(employee);
+        }
+
         [HttpGet("GetLocalRoles")]
         public List<Roles> GetAllLocalRoles()
         {

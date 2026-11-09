@@ -12,6 +12,8 @@ namespace APINIMIRHEMAA.Models
         public string? Client_Subject { get; set; }
         [NotMapped]
         public Guid? Client_SubjectReservation_ID { get; set; }
+        [NotMapped]
+        public int? RevisionOfQuotation_ID { get; set; }
         public string? Title { get; set; }
         [Column(TypeName = "decimal(18,2)")]
         public decimal Sub_Total { get; set; }
