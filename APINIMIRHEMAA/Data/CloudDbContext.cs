@@ -91,6 +91,8 @@ namespace APINIMIRHEMAA.Data
             });
             modelBuilder.Entity<JobOrder>()
                 .Ignore(jobOrder => jobOrder.Comments);
+
+            ApplyCreatedByFilters(modelBuilder);
         }
 
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -107,16 +109,60 @@ namespace APINIMIRHEMAA.Data
 
         private void SetCreatedByRecords()
         {
-            var creator = _localDb.GetCurrentEmployeeName();
+            var records = ChangeTracker.Entries()
+                .Where(entry => entry.State == EntityState.Added && entry.Entity is ICreatedByRecord)
+                .ToList();
+            if (records.Count == 0)
+            {
+                return;
+            }
 
-            foreach (var entry in ChangeTracker.Entries()
-                         .Where(entry => entry.State == EntityState.Added))
+            var creator = _localDb.GetCurrentEmployeeName();
+            var creatorUserId = _localDb.CurrentUserId;
+            var creatorDepartmentId = _localDb.CurrentDepartmentId;
+
+            foreach (var entry in records)
             {
                 if (entry.Entity is ICreatedByRecord record)
                 {
                     record.CreatedBy = creator;
+                    record.CreatedByUserId = creatorUserId;
+                    record.CreatedByDepartmentId = creatorDepartmentId;
                 }
             }
+        }
+
+        private int? CurrentUserId => _localDb.CurrentUserId;
+        private int? CurrentDepartmentId => _localDb.CurrentDepartmentId;
+        private bool HasGlobalRecordAccess => _localDb.HasGlobalRecordAccess;
+        private bool IsDepartmentManager => _localDb.IsDepartmentManager;
+
+        private void ApplyCreatedByFilters(ModelBuilder modelBuilder)
+        {
+            var filterMethod = GetType().GetMethod(
+                nameof(ApplyCreatedByFilter),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            var entityTypes = modelBuilder.Model.GetEntityTypes()
+                .Where(entityType => typeof(ICreatedByRecord).IsAssignableFrom(entityType.ClrType))
+                .ToList();
+
+            foreach (var entityType in entityTypes)
+            {
+                filterMethod.MakeGenericMethod(entityType.ClrType)
+                    .Invoke(this, new object[] { modelBuilder });
+            }
+        }
+
+        private void ApplyCreatedByFilter<TEntity>(ModelBuilder modelBuilder)
+            where TEntity : class, ICreatedByRecord
+        {
+            modelBuilder.Entity<TEntity>().HasQueryFilter(record =>
+                HasGlobalRecordAccess ||
+                (CurrentUserId.HasValue && record.CreatedByUserId == CurrentUserId) ||
+                (IsDepartmentManager &&
+                    CurrentUserId.HasValue &&
+                    CurrentDepartmentId.HasValue &&
+                    record.CreatedByDepartmentId == CurrentDepartmentId));
         }
     }
 }

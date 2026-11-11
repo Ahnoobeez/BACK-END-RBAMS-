@@ -383,7 +383,12 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var token = _jwtService.GenerateToken(
-                user.User_ID, user.Username, role.Role_Name, department.Department_Name, employeeName);
+                user.User_ID,
+                user.Username,
+                role.Role_Name,
+                department.Department_Name,
+                department.Department_ID,
+                employeeName);
             var permissions = await _accessPermissions.GetEffectivePermissionsAsync(
                 user.User_ID, null, null);
             var modules = AccessPermissionService.GetReadableModules(

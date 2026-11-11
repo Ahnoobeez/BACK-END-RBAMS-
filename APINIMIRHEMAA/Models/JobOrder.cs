@@ -5,6 +5,10 @@ namespace APINIMIRHEMAA.Models
     public class JobOrder : ICreatedByRecord
     {
         public string? CreatedBy { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByUserId { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByDepartmentId { get; set; }
         [Key]
         public int JobOrder_ID { get; set; }
         public int Conforme_FileID { get; set; }

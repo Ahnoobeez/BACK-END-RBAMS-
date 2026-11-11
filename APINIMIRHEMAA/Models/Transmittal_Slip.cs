@@ -5,6 +5,10 @@ namespace APINIMIRHEMAA.Models
     public class Transmittal_Slip : ICreatedByRecord
     {
         public string? CreatedBy { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByUserId { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByDepartmentId { get; set; }
         [Key]
         public int Control_Number { get; set; }
         public DateOnly Date { get; set; }

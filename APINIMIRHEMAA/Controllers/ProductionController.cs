@@ -1,4 +1,5 @@
 ﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.DTO.AuditTrail;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
 using APINIMIRHEMAA.DTO.JobOrders;
 using APINIMIRHEMAA.Models;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace APINIMIRHEMAA.Controllers
 {
@@ -137,6 +139,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
+            }
             jobOrder.Comments = new List<JobOrderComment>();
             _Localdb.Add(jobOrder);
             foreach (var purchaseOrder in _Localdb.PurchaseOrder.Where(
@@ -154,6 +161,11 @@ namespace APINIMIRHEMAA.Controllers
             if (jobOrderId <= 0)
             {
                 return BadRequest("A valid Job Order ID is required.");
+            }
+
+            if (!await _Localdb.JobOrder.AnyAsync(record => record.JobOrder_ID == jobOrderId))
+            {
+                return NotFound("Job Order not found.");
             }
 
             var updatedRows = await _Localdb.Database.ExecuteSqlInterpolatedAsync(
@@ -179,6 +191,11 @@ namespace APINIMIRHEMAA.Controllers
             if (_jobOrder == null)
             {
                 return BadRequest(_jobOrder);
+            }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(_jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
             }
             var updateJobOrder = _Localdb.JobOrder.FirstOrDefault(x => x.JobOrder_ID == Id);
             if (updateJobOrder == null)
@@ -234,6 +251,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
+            }
             _CloudDb.Add(jobOrder);
             _CloudDb.SaveChanges();
             return Ok(jobOrder);
@@ -245,6 +267,11 @@ namespace APINIMIRHEMAA.Controllers
             if (_jobOrder == null)
             {
                 return BadRequest(_jobOrder);
+            }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(_jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
             }
             var updateJobOrder = _CloudDb.JobOrder.FirstOrDefault(x => x.JobOrder_ID == Id);
             if (updateJobOrder == null)
@@ -521,9 +548,36 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("A valid schedule row is required.");
             }
 
+            var requestedBatchId = Request.Headers["X-Audit-Batch-Id"].FirstOrDefault();
+            var batchId = Guid.TryParse(requestedBatchId, out var parsedBatchId)
+                ? parsedBatchId.ToString("N")
+                : Guid.NewGuid().ToString("N");
+            Request.Headers["X-Audit-Batch-Id"] = batchId;
+
             var scheduleToDelete = await _Localdb.Installation_Schedule
                 .AsNoTracking()
                 .FirstOrDefaultAsync(schedule => schedule.Installation_ID == id);
+            var associatedJobOrder = scheduleToDelete == null
+                ? null
+                : await _Localdb.JobOrder
+                    .FirstOrDefaultAsync(record => record.JobOrder_ID == scheduleToDelete.JobOrder_ID);
+            var conforme = associatedJobOrder == null
+                ? null
+                : await _Localdb.Conforme
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(record => record.FileID == associatedJobOrder.Conforme_FileID);
+            var quotation = conforme == null
+                ? null
+                : await _Localdb.Quotation
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(record => record.Quotation_ID == conforme.Quotation_ID);
+            var clientName = quotation == null
+                ? null
+                : await _Localdb.Clients
+                    .AsNoTracking()
+                    .Where(client => client.Client_ID == quotation.Client_ID)
+                    .Select(client => client.Client_Name)
+                    .FirstOrDefaultAsync();
             await using var transaction = await _Localdb.Database.BeginTransactionAsync();
             await _Localdb.Installation_Schedule_Employee
                 .Where(assignment => assignment.Installation_ID == id)
@@ -540,11 +594,9 @@ namespace APINIMIRHEMAA.Controllers
 
             if (scheduleToDelete != null)
             {
-                var jobOrder = await _Localdb.JobOrder
-                    .FirstOrDefaultAsync(record => record.JobOrder_ID == scheduleToDelete.JobOrder_ID);
-                if (jobOrder != null)
+                if (associatedJobOrder != null)
                 {
-                    jobOrder.Installation_Date = await _Localdb.Installation_Schedule
+                    associatedJobOrder.Installation_Date = await _Localdb.Installation_Schedule
                         .Where(schedule => schedule.JobOrder_ID == scheduleToDelete.JobOrder_ID)
                         .OrderBy(schedule => schedule.Installation_ID)
                         .Select(schedule => (DateOnly?)schedule.Date)
@@ -553,12 +605,43 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var now = DateTime.Now;
+            var documentLabel = string.Join(" - ", new[]
+                {
+                    clientName,
+                    quotation?.Client_Subject,
+                    associatedJobOrder?.Title ?? quotation?.Title
+                }
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim()));
+            if (string.IsNullOrWhiteSpace(documentLabel))
+            {
+                documentLabel = "Installation Schedule";
+            }
+            var auditDetails = new AuditTrailDetailsDTO
+            {
+                Entity = nameof(Installation_Schedule),
+                RecordId = id.ToString(),
+                Operation = "Deleted",
+                BatchId = batchId,
+                DocumentLabel = documentLabel,
+                ActionDescription = "has been deleted",
+                PreviousValues = scheduleToDelete == null
+                    ? null
+                    : new Dictionary<string, string?>
+                    {
+                        ["Date"] = scheduleToDelete.Date.ToString("yyyy-MM-dd"),
+                        ["Time"] = scheduleToDelete.Time.ToString("HH:mm:ss"),
+                        ["Remarks"] = scheduleToDelete.Remarks,
+                        ["Mall_Hours"] = scheduleToDelete.Mall_Hours,
+                        ["Project Title"] = associatedJobOrder?.Title ?? quotation?.Title
+                    }
+            };
             _Localdb.AuditTrail.Add(new AuditTrail
             {
                 Name = _Localdb.GetCurrentEmployeeName(),
                 Date = DateOnly.FromDateTime(now),
                 Time = TimeOnly.FromDateTime(now),
-                Action = $"Installation_Schedule# {id} has been deleted",
+                Action = "AUDIT_DETAILS_V1:" + JsonSerializer.Serialize(auditDetails),
                 Department = "JobOrder"
             });
             await _Localdb.SaveChangesAsync();

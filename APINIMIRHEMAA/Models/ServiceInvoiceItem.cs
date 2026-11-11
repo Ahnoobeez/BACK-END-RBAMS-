@@ -2,8 +2,13 @@ using System.ComponentModel.DataAnnotations;
 
 namespace APINIMIRHEMAA.Models
 {
-    public class ServiceInvoiceItem
+    public class ServiceInvoiceItem : ICreatedByRecord
     {
+        public string? CreatedBy { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByUserId { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByDepartmentId { get; set; }
         [Key]
         public int ServiceInvoiceItem_ID { get; set; }
         public int ServiceInvoice_ID { get; set; }

@@ -74,7 +74,13 @@ namespace APINIMIRHEMAA.Controllers
             if (quantity <= 0)
                 return $"Requisition {slip.MR_ID} has an invalid quantity.";
 
-            if (InventoryRules.IsWarehouse(slip.FromWho))
+            if (InventoryRules.IsAdminSupplierReturn(slip.FromWho, slip.ToWho))
+            {
+                if ((inventory.Request_Purchased ?? 0) < quantity)
+                    return $"Requisition {slip.MR_ID} cannot be removed because its purchased-stock deduction is no longer recorded.";
+                inventory.Request_Purchased -= quantity;
+            }
+            else if (InventoryRules.IsWarehouse(slip.FromWho))
             {
                 var remaining = quantity;
                 var fromBuffer = Math.Min(remaining, Math.Max(inventory.Request_Buffer ?? 0, 0));
@@ -538,7 +544,10 @@ namespace APINIMIRHEMAA.Controllers
                 if (!IsPending(slip.Status))
                     return Conflict($"Requisition {slip.MR_ID} is already {slip.Status}.");
 
-                var directionError = InventoryRules.CheckDirection(slip.FromWho, slip.ToWho);
+                var isAdminSupplierReturn = InventoryRules.IsAdminSupplierReturn(slip.FromWho, slip.ToWho);
+                var directionError = isAdminSupplierReturn
+                    ? null
+                    : InventoryRules.CheckDirection(slip.FromWho, slip.ToWho);
                 if (directionError != null)
                     return Conflict($"Requisition {slip.MR_ID}: {directionError}");
 
@@ -556,7 +565,14 @@ namespace APINIMIRHEMAA.Controllers
                     return Conflict($"Requisition {slip.MR_ID} is not included in the pending request total.");
                 inv.Request -= qty;
 
-                if (InventoryRules.IsWarehouse(slip.FromWho))           // material leaves the warehouse
+                if (isAdminSupplierReturn)
+                {
+                    var plan = InventoryRules.PlanPurchasedIssue(inv, qty);
+                    if (plan.Error != null) return Conflict($"\"{slip.Material_Name}\": {plan.Error}");
+
+                    InventoryRules.Apply(inv, plan);
+                }
+                else if (InventoryRules.IsWarehouse(slip.FromWho))           // material leaves the warehouse
                 {
                     var plan = InventoryRules.PlanIssue(inv, qty);
                     if (plan.Error != null) return Conflict($"\"{slip.Material_Name}\": {plan.Error}");

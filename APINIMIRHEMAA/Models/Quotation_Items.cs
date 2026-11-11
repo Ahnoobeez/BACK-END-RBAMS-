@@ -6,6 +6,10 @@ namespace APINIMIRHEMAA.Models
     public class Quotation_Items : ICreatedByRecord
     {
         public string? CreatedBy { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByUserId { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByDepartmentId { get; set; }
         [Key]
         public int QI_ID { get; set; }
         public string? Requirements { get; set; }

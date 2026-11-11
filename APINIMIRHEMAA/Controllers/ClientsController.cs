@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace APINIMIRHEMAA.Controllers
 {
@@ -27,7 +28,7 @@ namespace APINIMIRHEMAA.Controllers
         private static IQueryable<ClientEntity> ClientsWithTelephoneAsText(DbSet<ClientEntity> clients)
         {
             return clients.FromSqlRaw(
-                "SELECT [Client_ID], [CreatedBy], COALESCE([Client_Name], N'') AS [Client_Name], COALESCE(CONVERT(nvarchar(16), [Client_Telephone]), N'') AS [Client_Telephone], [Contact_Person], [Business_Style], [Client_EmailAddress], COALESCE([TermsAndCondition], N'') AS [TermsAndCondition], [Company_Address], COALESCE([TIN], N'') AS [TIN], [Payment_Terms], COALESCE([Price_Per_Square_Inch], CONVERT(decimal(18,4), 0)) AS [Price_Per_Square_Inch] FROM [dbo].[Clients]");
+                "SELECT [Client_ID], [CreatedBy], [CreatedByUserId], [CreatedByDepartmentId], COALESCE([Client_Name], N'') AS [Client_Name], COALESCE(CONVERT(nvarchar(16), [Client_Telephone]), N'') AS [Client_Telephone], [Contact_Person], [Business_Style], [Client_EmailAddress], COALESCE([TermsAndCondition], N'') AS [TermsAndCondition], [Company_Address], COALESCE([TIN], N'') AS [TIN], [Payment_Terms], COALESCE([Price_Per_Square_Inch], CONVERT(decimal(18,4), 0)) AS [Price_Per_Square_Inch] FROM [dbo].[Clients]");
         }
 
         private ClientEntity PrepareClientForResponse(ClientEntity client)
@@ -53,6 +54,29 @@ namespace APINIMIRHEMAA.Controllers
             return clients.Any(client =>
                 (!excludingClientId.HasValue || client.Client_ID != excludingClientId.Value) &&
                 client.Client_Name.Trim().ToUpper() == comparisonName);
+        }
+
+        private static bool ClientTinExists(DbSet<ClientEntity> clients, string? tin, int? excludingClientId = null)
+        {
+            var normalizedTin = NormalizeTin(tin);
+            if (string.IsNullOrEmpty(normalizedTin))
+            {
+                return false;
+            }
+
+            return clients
+                .AsNoTracking()
+                .Where(client => !excludingClientId.HasValue || client.Client_ID != excludingClientId.Value)
+                .Select(client => client.TIN)
+                .ToList()
+                .Any(existingTin => NormalizeTin(existingTin) == normalizedTin);
+        }
+
+        private static string NormalizeTin(string? tin)
+        {
+            return string.IsNullOrWhiteSpace(tin)
+                ? string.Empty
+                : new string(tin.Where(char.IsDigit).ToArray());
         }
 
         [HttpGet("GetLocalClients")] 
@@ -86,15 +110,21 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            using var transaction = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
             if (ClientNameExists(_Localdb.Clients, ClientDetails.Client_Name))
             {
                 return Conflict("A client with this company name already exists.");
+            }
+            if (ClientTinExists(_Localdb.Clients, ClientDetails.TIN))
+            {
+                return Conflict("A client with this TIN number already exists.");
             }
 
             var businessStyle = ClientDetails.Business_Style;
             ClientDetails.Business_Style = _encryptionService.Encrypt(businessStyle);
             _Localdb.Clients.Add(ClientDetails);
             _Localdb.SaveChanges();
+            transaction.Commit();
             _Localdb.Entry(ClientDetails).State = EntityState.Detached;
             ClientDetails.Business_Style = businessStyle;
             return Ok(ClientDetails);
@@ -113,9 +143,14 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
+            using var transaction = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
             if (ClientNameExists(_Localdb.Clients, ClientDetails.Client_Name, Id))
             {
                 return Conflict("A client with this company name already exists.");
+            }
+            if (ClientTinExists(_Localdb.Clients, ClientDetails.TIN, Id))
+            {
+                return Conflict("A client with this TIN number already exists.");
             }
 
             clientDetails.Client_Name = ClientDetails.Client_Name;
@@ -130,6 +165,7 @@ namespace APINIMIRHEMAA.Controllers
             clientDetails.Price_Per_Square_Inch = ClientDetails.Price_Per_Square_Inch;
 
             _Localdb.SaveChanges();
+            transaction.Commit();
 
 
             return Ok(ClientDetails);
@@ -182,15 +218,21 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            using var transaction = _Clouddb.Database.BeginTransaction(IsolationLevel.Serializable);
             if (ClientNameExists(_Clouddb.Clients, ClientDetails.Client_Name))
             {
                 return Conflict("A client with this company name already exists.");
+            }
+            if (ClientTinExists(_Clouddb.Clients, ClientDetails.TIN))
+            {
+                return Conflict("A client with this TIN number already exists.");
             }
 
             var businessStyle = ClientDetails.Business_Style;
             ClientDetails.Business_Style = _encryptionService.Encrypt(businessStyle);
             _Clouddb.Clients.Add(ClientDetails);
             _Clouddb.SaveChanges();
+            transaction.Commit();
             _Clouddb.Entry(ClientDetails).State = EntityState.Detached;
             ClientDetails.Business_Style = businessStyle;
             return Ok(ClientDetails);
@@ -209,9 +251,14 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
+            using var transaction = _Clouddb.Database.BeginTransaction(IsolationLevel.Serializable);
             if (ClientNameExists(_Clouddb.Clients, ClientDetails.Client_Name, Id))
             {
                 return Conflict("A client with this company name already exists.");
+            }
+            if (ClientTinExists(_Clouddb.Clients, ClientDetails.TIN, Id))
+            {
+                return Conflict("A client with this TIN number already exists.");
             }
 
             clientDetails.Client_Name = ClientDetails.Client_Name;
@@ -226,6 +273,7 @@ namespace APINIMIRHEMAA.Controllers
             clientDetails.Price_Per_Square_Inch = ClientDetails.Price_Per_Square_Inch;
 
             _Clouddb.SaveChanges();
+            transaction.Commit();
 
 
             return Ok(ClientDetails);

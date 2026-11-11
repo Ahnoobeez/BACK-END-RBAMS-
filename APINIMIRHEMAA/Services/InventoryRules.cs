@@ -18,6 +18,10 @@ namespace APINIMIRHEMAA.Services
             (department.Contains("warehouse", StringComparison.OrdinalIgnoreCase) ||
              department.Contains("inventory", StringComparison.OrdinalIgnoreCase));
 
+        public static bool IsAdminSupplierReturn(string? from, string? to) =>
+            string.Equals(from?.Trim(), "Admin", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(to?.Trim(), "Supplier", StringComparison.OrdinalIgnoreCase);
+
         public static string? CheckDirection(string? from, string? to) =>
             IsWarehouse(from) == IsWarehouse(to)
                 ? "Choose the Warehouse as either the FROM or the TO department (not both, not neither)."
@@ -71,6 +75,27 @@ namespace APINIMIRHEMAA.Services
 
             plan.FromBalance = Math.Min(availableBalance, quantity);
             plan.FromBuffer = quantity - plan.FromBalance;
+            return plan;
+        }
+
+        public static IssuePlan PlanPurchasedIssue(Inventory inventory, int quantity)
+        {
+            var plan = new IssuePlan();
+            if (quantity <= 0)
+            {
+                plan.Error = "Quantity must be greater than zero.";
+                return plan;
+            }
+
+            var purchased = Math.Max((inventory.Purchased ?? 0) - (inventory.Request_Purchased ?? 0), 0);
+            var available = Math.Min(purchased, Math.Max(Available(inventory), 0));
+            if (available < quantity)
+            {
+                plan.Error = $"Not enough purchased stock. Available: {available}, requested: {quantity}.";
+                return plan;
+            }
+
+            plan.FromBalance = quantity;
             return plan;
         }
 

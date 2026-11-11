@@ -160,6 +160,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 deliveryFile.File_Data = _encryptionService.TryDecrypt(deliveryFile.File_Data);
             }
+            foreach (var deliveryReceipt in deliveryReceipts)
+            {
+                deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                    WorkflowRules.HasReceivedByPhoto(deliveryFiles, deliveryReceipt.Delivery_ID));
+            }
             var collectionReceipts = jobOrderIds.Count == 0
                 ? new List<Models.CollectionReceipt>()
                 : await _localDb.CollectionReceipt

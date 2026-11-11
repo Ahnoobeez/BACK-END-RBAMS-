@@ -1608,6 +1608,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(request.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
+            }
 
             var specialInstruction = request.SpecialInstruction?.Trim();
             var employeeName = string.IsNullOrWhiteSpace(specialInstruction)
@@ -1664,6 +1669,11 @@ namespace APINIMIRHEMAA.Controllers
             if (_jobOrder == null)
             {
                 return BadRequest(_jobOrder);
+            }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(_jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
             }
             var updateJobOrder = _Localdb.JobOrder.FirstOrDefault(x => x.JobOrder_ID == Id);
             if (updateJobOrder == null)
@@ -1722,6 +1732,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
+            }
 
             var conforme = _CloudDb.Conforme.FirstOrDefault(x => x.FileID == jobOrder.Conforme_FileID);
             if (conforme == null)
@@ -1745,6 +1760,11 @@ namespace APINIMIRHEMAA.Controllers
             if (_jobOrder == null)
             {
                 return BadRequest(_jobOrder);
+            }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(_jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
             }
             var updateJobOrder = _CloudDb.JobOrder.FirstOrDefault(x => x.JobOrder_ID == Id);
             if (updateJobOrder == null)
@@ -2129,6 +2149,16 @@ namespace APINIMIRHEMAA.Controllers
             var list = _Localdb.Graphics.AsNoTracking().ToList();
             foreach (var r in list) r.FileData = _encryptionService.TryDecrypt(r.FileData);
             return list;
+        }
+
+        [HttpGet("GetLocalGraphicsQuotationIDs")]
+        public List<int> GetLocalGraphicsQuotationIDs()
+        {
+            return _Localdb.Graphics
+                .AsNoTracking()
+                .Select(graphic => graphic.Quotation_ID)
+                .Distinct()
+                .ToList();
         }
 
         [HttpGet("GetLocalGraphicsByID")]
@@ -2910,7 +2940,23 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalDeliveryReceipts")]
         public List<DeliveryReceipt> GetAllLocalDeliveryReceipts()
         {
-            return _Localdb.DeliveryReceipt.ToList();
+            var receipts = _Localdb.DeliveryReceipt.AsNoTracking().ToList();
+            var deliveryIds = receipts.Select(receipt => receipt.Delivery_ID).ToArray();
+            var files = deliveryIds.Length == 0
+                ? new List<DeliveryFiles>()
+                : _Localdb.DeliveryFiles.AsNoTracking()
+                    .Where(file => deliveryIds.Contains(file.Delivery_ID))
+                    .ToList();
+            foreach (var file in files)
+            {
+                file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
+            }
+            foreach (var receipt in receipts)
+            {
+                receipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                    WorkflowRules.HasReceivedByPhoto(files, receipt.Delivery_ID));
+            }
+            return receipts;
         }
 
         [HttpGet("GetLocalDeliveryReceiptsByID")]
@@ -2920,11 +2966,20 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var deliveryReceipt = _Localdb.DeliveryReceipt.FirstOrDefault(x => x.Delivery_ID == id);
+            var deliveryReceipt = _Localdb.DeliveryReceipt.AsNoTracking().FirstOrDefault(x => x.Delivery_ID == id);
             if (deliveryReceipt == null)
             {
                 return NotFound();
             }
+            var files = _Localdb.DeliveryFiles.AsNoTracking()
+                .Where(file => file.Delivery_ID == id)
+                .ToList();
+            foreach (var file in files)
+            {
+                file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
+            }
+            deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                WorkflowRules.HasReceivedByPhoto(files, id));
             return Ok(deliveryReceipt);
         }
 
@@ -2935,12 +2990,17 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            if (deliveryReceipt.JobOrderID is not > 0 ||
+                !_Localdb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == deliveryReceipt.JobOrderID))
+            {
+                return BadRequest("A valid Job Order is required for the Delivery Receipt.");
+            }
             if (deliveryReceipt.JobOrderID is > 0 &&
                 _Localdb.DeliveryReceipt.Any(receipt => receipt.JobOrderID == deliveryReceipt.JobOrderID))
             {
                 return Conflict("A Delivery Receipt already exists for the selected Job Order.");
             }
-            deliveryReceipt.Status = "Completed";
+            deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(false);
             _Localdb.Add(deliveryReceipt);
             _Localdb.SaveChanges();
             return Ok(deliveryReceipt);
@@ -2953,10 +3013,21 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(deliveryReceipt);
             }
+            if (deliveryReceipt.JobOrderID is not > 0 ||
+                !_Localdb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == deliveryReceipt.JobOrderID))
+            {
+                return BadRequest("A valid Job Order is required for the Delivery Receipt.");
+            }
             var updateDeliveryReceipt = _Localdb.DeliveryReceipt.FirstOrDefault(x => x.Delivery_ID == Id);
             if (updateDeliveryReceipt == null)
             {
                 return NotFound();
+            }
+            if (_Localdb.DeliveryReceipt.Any(receipt =>
+                    receipt.Delivery_ID != Id &&
+                    receipt.JobOrderID == deliveryReceipt.JobOrderID))
+            {
+                return Conflict("A Delivery Receipt already exists for the selected Job Order.");
             }
 
             updateDeliveryReceipt.JobOrderID = deliveryReceipt.JobOrderID;
@@ -2966,7 +3037,17 @@ namespace APINIMIRHEMAA.Controllers
             updateDeliveryReceipt.Terms = deliveryReceipt.Terms;
             updateDeliveryReceipt.date = deliveryReceipt.date;
             updateDeliveryReceipt.time = deliveryReceipt.time;
-            updateDeliveryReceipt.Status = deliveryReceipt.Status;
+            updateDeliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                WorkflowRules.HasReceivedByPhoto(
+                    _Localdb.DeliveryFiles.AsNoTracking()
+                        .Where(file => file.Delivery_ID == Id)
+                        .ToList()
+                        .Select(file =>
+                        {
+                            file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
+                            return file;
+                        }),
+                    Id));
 
             _Localdb.SaveChanges();
             return Ok(updateDeliveryReceipt);
@@ -2989,7 +3070,19 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetCloudDeliveryReceipts")]
         public List<DeliveryReceipt> GetAllCloudDeliveryReceipts()
         {
-            return _Localdb.DeliveryReceipt.ToList();
+            var receipts = _CloudDb.DeliveryReceipt.AsNoTracking().ToList();
+            var deliveryIds = receipts.Select(receipt => receipt.Delivery_ID).ToArray();
+            var files = deliveryIds.Length == 0
+                ? new List<DeliveryFiles>()
+                : _CloudDb.DeliveryFiles.AsNoTracking()
+                    .Where(file => deliveryIds.Contains(file.Delivery_ID))
+                    .ToList();
+            foreach (var receipt in receipts)
+            {
+                receipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                    WorkflowRules.HasReceivedByPhoto(files, receipt.Delivery_ID));
+            }
+            return receipts;
         }
 
         [HttpGet("GetCloudDeliveryReceiptsByID")]
@@ -2999,11 +3092,16 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Invalid client ID.");
             }
-            var deliveryReceipt = _CloudDb.DeliveryReceipt.FirstOrDefault(x => x.Delivery_ID == id);
+            var deliveryReceipt = _CloudDb.DeliveryReceipt.AsNoTracking().FirstOrDefault(x => x.Delivery_ID == id);
             if (deliveryReceipt == null)
             {
                 return NotFound();
             }
+            var files = _CloudDb.DeliveryFiles.AsNoTracking()
+                .Where(file => file.Delivery_ID == id)
+                .ToList();
+            deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                WorkflowRules.HasReceivedByPhoto(files, id));
             return Ok(deliveryReceipt);
         }
 
@@ -3014,6 +3112,16 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            if (deliveryReceipt.JobOrderID is not > 0 ||
+                !_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == deliveryReceipt.JobOrderID))
+            {
+                return BadRequest("A valid Job Order is required for the Delivery Receipt.");
+            }
+            if (_CloudDb.DeliveryReceipt.Any(receipt => receipt.JobOrderID == deliveryReceipt.JobOrderID))
+            {
+                return Conflict("A Delivery Receipt already exists for the selected Job Order.");
+            }
+            deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(false);
             _CloudDb.Add(deliveryReceipt);
             _CloudDb.SaveChanges();
             return Ok(deliveryReceipt);
@@ -3026,12 +3134,33 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(deliveryReceipt);
             }
+            if (deliveryReceipt.JobOrderID is not > 0 ||
+                !_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == deliveryReceipt.JobOrderID))
+            {
+                return BadRequest("A valid Job Order is required for the Delivery Receipt.");
+            }
             var updateDeliveryReceipt = _CloudDb.DeliveryReceipt.FirstOrDefault(x => x.Delivery_ID == Id);
             if (updateDeliveryReceipt == null)
             {
                 return NotFound();
             }
-            updateDeliveryReceipt.Status = deliveryReceipt.Status;
+            if (_CloudDb.DeliveryReceipt.Any(receipt =>
+                    receipt.Delivery_ID != Id &&
+                    receipt.JobOrderID == deliveryReceipt.JobOrderID))
+            {
+                return Conflict("A Delivery Receipt already exists for the selected Job Order.");
+            }
+            updateDeliveryReceipt.JobOrderID = deliveryReceipt.JobOrderID;
+            updateDeliveryReceipt.Title = deliveryReceipt.Title;
+            updateDeliveryReceipt.ClientName = deliveryReceipt.ClientName;
+            updateDeliveryReceipt.Address = deliveryReceipt.Address;
+            updateDeliveryReceipt.Terms = deliveryReceipt.Terms;
+            updateDeliveryReceipt.date = deliveryReceipt.date;
+            updateDeliveryReceipt.time = deliveryReceipt.time;
+            updateDeliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                WorkflowRules.HasReceivedByPhoto(
+                    _CloudDb.DeliveryFiles.Where(file => file.Delivery_ID == Id).ToList(),
+                    Id));
             _CloudDb.SaveChanges();
             return Ok(updateDeliveryReceipt);
         }
@@ -3150,12 +3279,37 @@ namespace APINIMIRHEMAA.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var error = UploadValidator.ValidatePdf(deliveryFiles.File_Data);   // ValidateImage for Collection Receipt, ValidateImageOrPdf for Graphics, ValidateImage for Delivery Files
+            var isReceivedBy = WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role);
+            var error = isReceivedBy
+                ? UploadValidator.ValidateImage(deliveryFiles.File_Data)
+                : UploadValidator.ValidatePdf(deliveryFiles.File_Data);
             if (error != null) return BadRequest(error);
+            DeliveryReceipt? deliveryReceipt = null;
+            JobOrder? jobOrder = null;
+            if (isReceivedBy)
+            {
+                deliveryReceipt = _Localdb.DeliveryReceipt
+                    .FirstOrDefault(receipt => receipt.Delivery_ID == deliveryFiles.Delivery_ID);
+                if (deliveryReceipt?.JobOrderID is not > 0)
+                {
+                    return BadRequest("A Received By photo must be linked to a Delivery Receipt with a valid Job Order.");
+                }
+                jobOrder = _Localdb.JobOrder
+                    .FirstOrDefault(record => record.JobOrder_ID == deliveryReceipt.JobOrderID);
+                if (jobOrder == null)
+                {
+                    return BadRequest("The Delivery Receipt is linked to a missing Job Order.");
+                }
+            }
 
             var plain = deliveryFiles.File_Data;
             deliveryFiles.File_Data = _encryptionService.Encrypt(plain);
             _Localdb.DeliveryFiles.Add(deliveryFiles);
+            if (isReceivedBy)
+            {
+                deliveryReceipt!.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
+                jobOrder!.Date_Delivered = DateOnly.FromDateTime(DateTime.Now);
+            }
             _Localdb.SaveChanges();
             deliveryFiles.File_Data = plain;
             return Ok(deliveryFiles);
@@ -3210,6 +3364,7 @@ namespace APINIMIRHEMAA.Controllers
             foreach (var deliveryReceipt in deliveryReceipts.Values)
             {
                 var jobOrder = deliveredJobOrders[deliveryReceipt.JobOrderID.GetValueOrDefault()];
+                deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
                 jobOrder.Date_Delivered = DateOnly.FromDateTime(DateTime.Now);
             }
             _Localdb.SaveChanges();
@@ -3228,7 +3383,24 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
+            var isReceivedBy = WorkflowRules.IsReceivedByRole(updateDeliveryFiles.File_Role);
+            var error = isReceivedBy
+                ? UploadValidator.ValidateImage(deliveryFiles.File_Data)
+                : UploadValidator.ValidatePdf(deliveryFiles.File_Data);
+            if (error != null)
+            {
+                return BadRequest(error);
+            }
             updateDeliveryFiles.File_Data = _encryptionService.Encrypt(deliveryFiles.File_Data);
+            if (isReceivedBy)
+            {
+                var deliveryReceipt = _Localdb.DeliveryReceipt
+                    .FirstOrDefault(receipt => receipt.Delivery_ID == updateDeliveryFiles.Delivery_ID);
+                if (deliveryReceipt != null)
+                {
+                    deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
+                }
+            }
             _Localdb.SaveChanges();
             return Ok(updateDeliveryFiles);
         }
@@ -3240,6 +3412,21 @@ namespace APINIMIRHEMAA.Controllers
             if (deliveryFiles == null)
             {
                 return NotFound();
+            }
+            var deliveryId = deliveryFiles.Delivery_ID;
+            var deliveryReceipt = _Localdb.DeliveryReceipt
+                .FirstOrDefault(receipt => receipt.Delivery_ID == deliveryId);
+            if (deliveryReceipt != null && WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role))
+            {
+                var remainingFiles = _Localdb.DeliveryFiles.AsNoTracking()
+                    .Where(file => file.Delivery_ID == deliveryId && file.File_ID != id)
+                    .ToList();
+                foreach (var file in remainingFiles)
+                {
+                    file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
+                }
+                deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                    WorkflowRules.HasReceivedByPhoto(remainingFiles, deliveryId));
             }
             _Localdb.Remove(deliveryFiles);
             _Localdb.SaveChanges();
@@ -3274,7 +3461,34 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            DeliveryReceipt? deliveryReceipt = null;
+            JobOrder? jobOrder = null;
+            if (WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role))
+            {
+                var error = UploadValidator.ValidateImage(deliveryFiles.File_Data);
+                if (error != null)
+                {
+                    return BadRequest(error);
+                }
+                deliveryReceipt = _CloudDb.DeliveryReceipt
+                    .FirstOrDefault(receipt => receipt.Delivery_ID == deliveryFiles.Delivery_ID);
+                if (deliveryReceipt?.JobOrderID is not > 0)
+                {
+                    return BadRequest("A Received By photo must be linked to a Delivery Receipt with a valid Job Order.");
+                }
+                jobOrder = _CloudDb.JobOrder
+                    .FirstOrDefault(record => record.JobOrder_ID == deliveryReceipt.JobOrderID);
+                if (jobOrder == null)
+                {
+                    return BadRequest("The Delivery Receipt is linked to a missing Job Order.");
+                }
+            }
             _CloudDb.Add(deliveryFiles);
+            if (deliveryReceipt != null)
+            {
+                deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
+                jobOrder!.Date_Delivered = DateOnly.FromDateTime(DateTime.Now);
+            }
             _CloudDb.SaveChanges();
             return Ok(deliveryFiles);
         }
@@ -3291,12 +3505,43 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            updateDeliveryFiles.File_ID = deliveryFiles.File_ID;
+            var previousDeliveryId = updateDeliveryFiles.Delivery_ID;
+            var wasReceivedBy = WorkflowRules.IsReceivedByRole(updateDeliveryFiles.File_Role);
+            var isReceivedBy = WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role);
+            if (isReceivedBy)
+            {
+                var error = UploadValidator.ValidateImage(deliveryFiles.File_Data);
+                if (error != null)
+                {
+                    return BadRequest(error);
+                }
+                var targetReceipt = _CloudDb.DeliveryReceipt
+                    .FirstOrDefault(receipt => receipt.Delivery_ID == deliveryFiles.Delivery_ID);
+                if (targetReceipt?.JobOrderID is not > 0 ||
+                    !_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == targetReceipt.JobOrderID))
+                {
+                    return BadRequest("A Received By photo must be linked to a Delivery Receipt with a valid Job Order.");
+                }
+            }
             updateDeliveryFiles.Delivery_ID = deliveryFiles.Delivery_ID;
             updateDeliveryFiles.File_Role = deliveryFiles.File_Role;
             updateDeliveryFiles.File_Name = deliveryFiles.File_Name;
             updateDeliveryFiles.File_Extension = deliveryFiles.File_Extension;
             updateDeliveryFiles.File_Data = deliveryFiles.File_Data;
+            if (wasReceivedBy || isReceivedBy)
+            {
+                var affectedDeliveryIds = new[] { previousDeliveryId, updateDeliveryFiles.Delivery_ID }.Distinct().ToArray();
+                var remainingFiles = _CloudDb.DeliveryFiles.AsNoTracking()
+                    .Where(file => affectedDeliveryIds.Contains(file.Delivery_ID) && file.File_ID != Id)
+                    .ToList();
+                remainingFiles.Add(updateDeliveryFiles);
+                foreach (var receipt in _CloudDb.DeliveryReceipt
+                             .Where(record => affectedDeliveryIds.Contains(record.Delivery_ID)))
+                {
+                    receipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                        WorkflowRules.HasReceivedByPhoto(remainingFiles, receipt.Delivery_ID));
+                }
+            }
             _CloudDb.SaveChanges();
             return Ok(updateDeliveryFiles);
         }
@@ -3308,6 +3553,17 @@ namespace APINIMIRHEMAA.Controllers
             if (deliveryFiles == null)
             {
                 return NotFound();
+            }
+            var deliveryId = deliveryFiles.Delivery_ID;
+            var deliveryReceipt = _CloudDb.DeliveryReceipt
+                .FirstOrDefault(receipt => receipt.Delivery_ID == deliveryId);
+            if (deliveryReceipt != null && WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role))
+            {
+                var remainingFiles = _CloudDb.DeliveryFiles.AsNoTracking()
+                    .Where(file => file.Delivery_ID == deliveryId && file.File_ID != id)
+                    .ToList();
+                deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                    WorkflowRules.HasReceivedByPhoto(remainingFiles, deliveryId));
             }
             _CloudDb.Remove(deliveryFiles);
             _CloudDb.SaveChanges();

@@ -19,6 +19,7 @@ namespace APINIMIRHEMAA.Services
             string username,
             string role,
             string department,
+            int departmentId,
             string employeeName)
         {
             var claims = new List<Claim>
@@ -46,6 +47,11 @@ namespace APINIMIRHEMAA.Services
                 new Claim(
                     "Department",
                     department
+                ),
+
+                new Claim(
+                    "DepartmentId",
+                    departmentId.ToString()
                 )
             };
 

@@ -8,6 +8,7 @@ namespace APINIMIRHEMAA.DTO.JobOrders
         public int Conforme_FileID { get; set; }
         public string? Title { get; set; }
         public DateOnly? Installation_Date { get; set; }
+        [Required]
         public DateOnly? Target_Delivery { get; set; }
         public DateOnly? Date_Delivered { get; set; }
         public bool? Tiling { get; set; }

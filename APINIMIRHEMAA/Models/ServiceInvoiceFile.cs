@@ -19,5 +19,9 @@ namespace APINIMIRHEMAA.Models
         [MaxLength(50)]
         public string Status { get; set; } = "Pending";
         public string? CreatedBy { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByUserId { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByDepartmentId { get; set; }
     }
 }

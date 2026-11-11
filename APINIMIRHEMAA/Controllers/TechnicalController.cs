@@ -1,6 +1,7 @@
 ﻿using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.JobOrders;
 using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -39,6 +40,11 @@ namespace APINIMIRHEMAA.Controllers
             if (jobOrderId <= 0)
             {
                 return BadRequest("A valid Job Order ID is required.");
+            }
+
+            if (!await _Localdb.JobOrder.AnyAsync(record => record.JobOrder_ID == jobOrderId))
+            {
+                return NotFound("Job Order not found.");
             }
 
             var updatedRows = await _Localdb.Database.ExecuteSqlInterpolatedAsync(
@@ -138,6 +144,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
+            }
             jobOrder.Comments = new List<JobOrderComment>();
             _Localdb.Add(jobOrder);
             foreach (var purchaseOrder in _Localdb.PurchaseOrder.Where(
@@ -155,6 +166,11 @@ namespace APINIMIRHEMAA.Controllers
             if (jobOrderId <= 0)
             {
                 return BadRequest("A valid Job Order ID is required.");
+            }
+
+            if (!await _Localdb.JobOrder.AnyAsync(record => record.JobOrder_ID == jobOrderId))
+            {
+                return NotFound("Job Order not found.");
             }
 
             var updatedRows = await _Localdb.Database.ExecuteSqlInterpolatedAsync(
@@ -180,6 +196,11 @@ namespace APINIMIRHEMAA.Controllers
             if (_jobOrder == null)
             {
                 return BadRequest(_jobOrder);
+            }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(_jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
             }
             var updateJobOrder = _Localdb.JobOrder.FirstOrDefault(x => x.JobOrder_ID == Id);
             if (updateJobOrder == null)
@@ -235,6 +256,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
+            }
             _CloudDb.Add(jobOrder);
             _CloudDb.SaveChanges();
             return Ok(jobOrder);
@@ -246,6 +272,11 @@ namespace APINIMIRHEMAA.Controllers
             if (_jobOrder == null)
             {
                 return BadRequest(_jobOrder);
+            }
+            var targetDeliveryError = WorkflowRules.ValidateTargetDelivery(_jobOrder.Target_Delivery);
+            if (targetDeliveryError != null)
+            {
+                return BadRequest(targetDeliveryError);
             }
             var updateJobOrder = _CloudDb.JobOrder.FirstOrDefault(x => x.JobOrder_ID == Id);
             if (updateJobOrder == null)

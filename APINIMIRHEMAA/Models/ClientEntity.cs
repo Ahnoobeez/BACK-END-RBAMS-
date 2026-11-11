@@ -6,6 +6,10 @@ namespace APINIMIRHEMAA.Models
     public class ClientEntity : ICreatedByRecord
     {
         public string? CreatedBy { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByUserId { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? CreatedByDepartmentId { get; set; }
         [Key]
         public int Client_ID { get; set; }
         [Required]
