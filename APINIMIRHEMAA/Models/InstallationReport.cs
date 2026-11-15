@@ -80,5 +80,8 @@ namespace APINIMIRHEMAA.Models
 
         [MaxLength(200)]
         public string? ApprovedBy { get; set; }
+
+        [NotMapped]
+        public List<InstallationReportFile> SignatureFiles { get; set; } = new();
     }
 }

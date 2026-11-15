@@ -818,28 +818,61 @@ namespace APINIMIRHEMAA.Controllers
 
 
         [HttpGet("GetLocalQuotationItems")]
-        public List<Quotation_Items> GetAllLocalQuotationsItems()
+        public async Task<List<Quotation_Items>> GetAllLocalQuotationsItems()
         {
-            return _Localdb.Quotation_Items
+            var items = await _Localdb.Quotation_Items
+                .AsNoTracking()
                 .Include(item => item.Materials)
-                .ToList();
+                .ToListAsync();
+            await PopulateQuotationStoreIds(items);
+            return items;
         }
 
         [HttpGet("GetLocalQuotationItemsByID")]
-        public ActionResult<Quotation_Items> GetLocalQuotationItemDetails(Int32 Id)
+        public async Task<ActionResult<Quotation_Items>> GetLocalQuotationItemDetails(Int32 Id)
         {
             if (Id == 0)
             {
                 return BadRequest("Invalid client ID.");
             }
-            var QI_Id = _Localdb.Quotation_Items
+            var QI_Id = await _Localdb.Quotation_Items
                 .Include(item => item.Materials)
-                .FirstOrDefault(x => x.QI_ID == Id);
+                .FirstOrDefaultAsync(x => x.QI_ID == Id);
             if (QI_Id == null)
             {
                 return NotFound("Client not found.");
             }
+            await PopulateQuotationStoreIds(new[] { QI_Id });
             return QI_Id;
+        }
+
+        private async Task PopulateQuotationStoreIds(IEnumerable<Quotation_Items> items)
+        {
+            var itemList = items.ToList();
+            if (itemList.Count == 0)
+            {
+                return;
+            }
+
+            var itemIds = itemList.Select(item => item.QI_ID).ToList();
+            var storeLinks = await _Localdb.QuotationItemStores
+                .AsNoTracking()
+                .Where(link => itemIds.Contains(link.QI_ID))
+                .ToListAsync();
+            var storeIdsByItem = storeLinks
+                .GroupBy(link => link.QI_ID)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(link => link.QS_ID).ToHashSet());
+
+            foreach (var item in itemList)
+            {
+                var storeIds = storeIdsByItem.TryGetValue(item.QI_ID, out var linkedStoreIds)
+                    ? linkedStoreIds
+                    : new HashSet<int>();
+                storeIds.Add(item.QS_ID);
+                item.QuotationStoreIds = storeIds.OrderBy(storeId => storeId).ToList();
+            }
         }
 
         [HttpGet("GetLocalQuotationItemMaterials")]
@@ -873,10 +906,35 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid quotation store ID is required.");
             }
+            if (request.QuotationStoreIds == null || request.Materials == null)
+            {
+                return BadRequest("Quotation store IDs and materials must be provided as lists.");
+            }
+            if (request.QuotationStoreIds.Any(storeId => storeId <= 0))
+            {
+                return BadRequest("All quotation store IDs must be positive integers.");
+            }
             if (request.Materials.Any(material => material.Material_ID <= 0) ||
                 request.Materials.Select(material => material.Material_ID).Distinct().Count() != request.Materials.Count)
             {
                 return BadRequest("Selected materials must have valid, unique material IDs.");
+            }
+
+            var quotationStoreIds = request.QuotationStoreIds
+                .Append(request.QS_ID)
+                .Distinct()
+                .ToList();
+            var quotationStores = await _Localdb.Quotation_Store
+                .Where(store => quotationStoreIds.Contains(store.QS_ID))
+                .ToListAsync();
+            if (quotationStores.Count != quotationStoreIds.Count)
+            {
+                return BadRequest("One or more selected quotation stores no longer exist.");
+            }
+            var primaryStore = quotationStores.FirstOrDefault(store => store.QS_ID == request.QS_ID);
+            if (primaryStore == null || quotationStores.Any(store => store.Quotation_ID != primaryStore.Quotation_ID))
+            {
+                return BadRequest("A quotation item can only be shared between stores in the same quotation.");
             }
 
             var materialIds = request.Materials.Select(material => material.Material_ID).ToList();
@@ -913,8 +971,17 @@ namespace APINIMIRHEMAA.Controllers
                 }).ToList()
             };
 
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync();
             _Localdb.Quotation_Items.Add(quotationItem);
             await _Localdb.SaveChangesAsync();
+            _Localdb.QuotationItemStores.AddRange(quotationStoreIds.Select(storeId => new QuotationItemStore
+            {
+                QI_ID = quotationItem.QI_ID,
+                QS_ID = storeId
+            }));
+            await _Localdb.SaveChangesAsync();
+            await transaction.CommitAsync();
+            quotationItem.QuotationStoreIds = quotationStoreIds;
             return Ok(quotationItem);
         }
 
@@ -1303,18 +1370,87 @@ namespace APINIMIRHEMAA.Controllers
                 .OrderByDescending(jobOrder => jobOrder.JobOrder_ID)
                 .ToListAsync();
 
+            if (recordType?.Trim().Equals("delivery-receipt", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var jobOrderIds = jobOrders.Select(jobOrder => jobOrder.JobOrder_ID).ToList();
+                if (jobOrderIds.Count == 0)
+                {
+                    return Ok(new List<JobOrder>());
+                }
+
+                var jobOrderItems = await _Localdb.JobOrderItems
+                    .AsNoTracking()
+                    .Where(item => jobOrderIds.Contains(item.JobOrder_ID))
+                    .ToListAsync();
+                var deliveryReceipts = await _Localdb.DeliveryReceipt
+                    .AsNoTracking()
+                    .Where(receipt => receipt.JobOrderID.HasValue && jobOrderIds.Contains(receipt.JobOrderID.Value))
+                    .ToListAsync();
+                var deliveryReceiptIds = deliveryReceipts.Select(receipt => receipt.Delivery_ID).ToList();
+                var deliveryReceiptItems = deliveryReceiptIds.Count == 0
+                    ? new List<DeliveryReceiptItems>()
+                    : await _Localdb.DeliveryReceiptItems
+                        .AsNoTracking()
+                        .Where(item => deliveryReceiptIds.Contains(item.Delivery_ID))
+                        .ToListAsync();
+                var jobOrderIdByDeliveryId = deliveryReceipts
+                    .Where(receipt => receipt.JobOrderID.HasValue)
+                    .ToDictionary(receipt => receipt.Delivery_ID, receipt => receipt.JobOrderID!.Value);
+                var deliveredBranchesByJobOrderId = new Dictionary<int, HashSet<string>>();
+                foreach (var receiptItem in deliveryReceiptItems)
+                {
+                    if (!jobOrderIdByDeliveryId.TryGetValue(receiptItem.Delivery_ID, out var jobOrderId) ||
+                        string.IsNullOrWhiteSpace(receiptItem.Store))
+                    {
+                        continue;
+                    }
+
+                    if (!deliveredBranchesByJobOrderId.TryGetValue(jobOrderId, out var branches))
+                    {
+                        branches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        deliveredBranchesByJobOrderId[jobOrderId] = branches;
+                    }
+                    branches.Add(receiptItem.Store.Trim());
+                }
+
+                var branchesByJobOrderId = jobOrderItems
+                    .Where(item => !string.IsNullOrWhiteSpace(item.Store))
+                    .GroupBy(item => item.JobOrder_ID)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group
+                            .Select(item => item.Store!.Trim())
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList());
+                var eligibleJobOrders = new List<JobOrder>();
+                foreach (var jobOrder in jobOrders)
+                {
+                    if (!branchesByJobOrderId.TryGetValue(jobOrder.JobOrder_ID, out var branches))
+                    {
+                        continue;
+                    }
+
+                    deliveredBranchesByJobOrderId.TryGetValue(jobOrder.JobOrder_ID, out var deliveredBranches);
+                    var remainingBranches = branches
+                        .Where(branch => deliveredBranches == null || !deliveredBranches.Contains(branch))
+                        .ToList();
+                    if (remainingBranches.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    jobOrder.AvailableDeliveryReceiptBranches = remainingBranches;
+                    eligibleJobOrders.Add(jobOrder);
+                }
+
+                return Ok(eligibleJobOrders);
+            }
+
             var existingJobOrderIds = new HashSet<int>();
             switch (recordType?.Trim().ToLowerInvariant())
             {
                 case null:
                 case "":
-                    break;
-                case "delivery-receipt":
-                    existingJobOrderIds.UnionWith(await _Localdb.DeliveryReceipt
-                        .AsNoTracking()
-                        .Where(receipt => receipt.JobOrderID.HasValue)
-                        .Select(receipt => receipt.JobOrderID!.Value)
-                        .ToListAsync());
                     break;
                 case "collection-receipt":
                     existingJobOrderIds.UnionWith(await _Localdb.CollectionReceipt
@@ -1475,6 +1611,7 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("AddLocalInstallationReport")]
+        [RequestSizeLimit(10_000_000)]
         public async Task<ActionResult> AddLocalInstallationReport([FromBody] CreateInstallationReportRequest request)
         {
             if (!ModelState.IsValid)
@@ -1494,6 +1631,73 @@ namespace APINIMIRHEMAA.Controllers
                 .AnyAsync(report => report.JobOrder_ID == request.JobOrderId))
             {
                 return Conflict("An Installation Report already exists for the selected Job Order.");
+            }
+
+            if (request.Signatures == null || request.Signatures.Count == 0 || request.Signatures.Count > 3)
+            {
+                return BadRequest("The prepared-by user signature is required, and no more than three sign-off images may be submitted.");
+            }
+
+            var signatureRoles = new HashSet<string>(StringComparer.Ordinal);
+            var signatureFiles = new List<InstallationReportFile>();
+            foreach (var signature in request.Signatures)
+            {
+                if (signature == null)
+                {
+                    return BadRequest("An Installation Report signature entry is missing.");
+                }
+                if (!signatureRoles.Add(signature.FileRole))
+                {
+                    return BadRequest($"Only one {signature.FileRole} signature image may be submitted.");
+                }
+
+                var extension = signature.FileExtension.Trim().ToLowerInvariant();
+                if (extension is not ".png" and not ".jpg" and not ".jpeg")
+                {
+                    return BadRequest("Installation Report sign-off files must be JPG or PNG images.");
+                }
+
+                var validationError = UploadValidator.ValidateImage(signature.FileData);
+                if (validationError != null)
+                {
+                    return BadRequest(validationError);
+                }
+
+                var fileData = signature.FileData;
+                if (fileData.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var separator = fileData.IndexOf(',');
+                    fileData = separator < 0 ? string.Empty : fileData[(separator + 1)..];
+                }
+
+                byte[] imageBytes;
+                try
+                {
+                    imageBytes = Convert.FromBase64String(fileData);
+                }
+                catch (FormatException)
+                {
+                    return BadRequest("An Installation Report signature image contains invalid file data.");
+                }
+
+                var fileName = Path.GetFileName(signature.FileName.Trim());
+                if (string.IsNullOrWhiteSpace(fileName))
+                {
+                    return BadRequest("Every Installation Report signature image must have a file name.");
+                }
+
+                signatureFiles.Add(new InstallationReportFile
+                {
+                    File_Role = signature.FileRole,
+                    File_Name = fileName,
+                    File_Extension = extension,
+                    File_Data = _encryptionService.Encrypt(imageBytes)
+                });
+            }
+
+            if (!signatureRoles.Contains("PreparedBy"))
+            {
+                return BadRequest("The prepared-by user signature is required.");
             }
 
             var report = new InstallationReport
@@ -1524,8 +1728,16 @@ namespace APINIMIRHEMAA.Controllers
                 ApprovedBy = request.ApprovedBy
             };
 
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync();
             _Localdb.InstallationReport.Add(report);
             await _Localdb.SaveChangesAsync();
+            foreach (var signatureFile in signatureFiles)
+            {
+                signatureFile.InstallationReport_ID = report.InstallationReport_ID;
+            }
+            await _Localdb.InstallationReportFiles.AddRangeAsync(signatureFiles);
+            await _Localdb.SaveChangesAsync();
+            await transaction.CommitAsync();
 
             return Ok(new
             {
@@ -2995,11 +3207,6 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid Job Order is required for the Delivery Receipt.");
             }
-            if (deliveryReceipt.JobOrderID is > 0 &&
-                _Localdb.DeliveryReceipt.Any(receipt => receipt.JobOrderID == deliveryReceipt.JobOrderID))
-            {
-                return Conflict("A Delivery Receipt already exists for the selected Job Order.");
-            }
             deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(false);
             _Localdb.Add(deliveryReceipt);
             _Localdb.SaveChanges();
@@ -3023,13 +3230,6 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            if (_Localdb.DeliveryReceipt.Any(receipt =>
-                    receipt.Delivery_ID != Id &&
-                    receipt.JobOrderID == deliveryReceipt.JobOrderID))
-            {
-                return Conflict("A Delivery Receipt already exists for the selected Job Order.");
-            }
-
             updateDeliveryReceipt.JobOrderID = deliveryReceipt.JobOrderID;
             updateDeliveryReceipt.Title = deliveryReceipt.Title;
             updateDeliveryReceipt.ClientName = deliveryReceipt.ClientName;
@@ -3117,10 +3317,6 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid Job Order is required for the Delivery Receipt.");
             }
-            if (_CloudDb.DeliveryReceipt.Any(receipt => receipt.JobOrderID == deliveryReceipt.JobOrderID))
-            {
-                return Conflict("A Delivery Receipt already exists for the selected Job Order.");
-            }
             deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(false);
             _CloudDb.Add(deliveryReceipt);
             _CloudDb.SaveChanges();
@@ -3143,12 +3339,6 @@ namespace APINIMIRHEMAA.Controllers
             if (updateDeliveryReceipt == null)
             {
                 return NotFound();
-            }
-            if (_CloudDb.DeliveryReceipt.Any(receipt =>
-                    receipt.Delivery_ID != Id &&
-                    receipt.JobOrderID == deliveryReceipt.JobOrderID))
-            {
-                return Conflict("A Delivery Receipt already exists for the selected Job Order.");
             }
             updateDeliveryReceipt.JobOrderID = deliveryReceipt.JobOrderID;
             updateDeliveryReceipt.Title = deliveryReceipt.Title;
@@ -3901,6 +4091,7 @@ namespace APINIMIRHEMAA.Controllers
                 PurchaseOrder = EncryptTable(_Localdb.PurchaseOrder, x => x.FileID, x => x.FileData, (x, d) => x.FileData = d),
                 Graphics = EncryptTable(_Localdb.Graphics, x => x.FileID, x => x.FileData, (x, d) => x.FileData = d),
                 DeliveryFiles = EncryptTable(_Localdb.DeliveryFiles, x => x.File_ID, x => x.File_Data, (x, d) => x.File_Data = d),
+                InstallationReportFiles = EncryptTable(_Localdb.InstallationReportFiles, x => x.InstallationReportFile_ID, x => x.File_Data, (x, d) => x.File_Data = d),
                 CollectionReceipt = EncryptTable(_Localdb.CollectionReceipt, x => x.CollectionReceipt_ID, x => x.FileData, (x, d) => x.FileData = d)
             };
             return Ok(result);

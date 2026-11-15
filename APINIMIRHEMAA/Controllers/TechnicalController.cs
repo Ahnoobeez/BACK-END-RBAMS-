@@ -449,7 +449,10 @@ namespace APINIMIRHEMAA.Controllers
         [HttpGet("GetLocalMaterialRequesitionSlips")]
         public List<MaterialRequesition_Slip> GetAllLocalMaterialRequesitionSlips()
         {
-            return _Localdb.MaterialRequisition_Slip.ToList();
+            return _Localdb.MaterialRequisition_Slip
+                .AsNoTracking()
+                .Where(slip => slip.FromWho != null && slip.FromWho.Trim().ToLower() == "technical")
+                .ToList();
         }
 
         [HttpGet("GetLocalMaterialRequesitionSlipsByID")]

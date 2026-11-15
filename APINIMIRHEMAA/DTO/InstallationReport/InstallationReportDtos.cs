@@ -79,5 +79,22 @@ namespace APINIMIRHEMAA.DTO.InstallationReport
 
         [MaxLength(200)]
         public string? ApprovedBy { get; set; }
+
+        public List<CreateInstallationReportSignatureRequest>? Signatures { get; set; }
+    }
+
+    public sealed class CreateInstallationReportSignatureRequest
+    {
+        [Required, RegularExpression("^(PreparedBy|ApprovedBy|ClientSignature)$")]
+        public string FileRole { get; set; } = string.Empty;
+
+        [Required, MaxLength(255)]
+        public string FileName { get; set; } = string.Empty;
+
+        [Required, MaxLength(10)]
+        public string FileExtension { get; set; } = string.Empty;
+
+        [Required]
+        public string FileData { get; set; } = string.Empty;
     }
 }

@@ -18,6 +18,7 @@ namespace APINIMIRHEMAA.Data
             _http = http;
         }
         public DbSet<ClientEntity> Clients { get; set; }
+        public DbSet<ClientAccessGrant> ClientAccessGrants { get; set; }
         public DbSet<Quotation> Quotation { get; set; }
         public DbSet<ClientQuotationSequence> ClientQuotationSequences { get; set; }
         public DbSet<ClientQuotationReservation> ClientQuotationReservations { get; set; }
@@ -31,6 +32,7 @@ namespace APINIMIRHEMAA.Data
         public DbSet<Installation_Schedule> Installation_Schedule { get; set; }
         public DbSet<InstallationScheduleEmployee> Installation_Schedule_Employee { get; set; }
         public DbSet<InstallationReport> InstallationReport { get; set; }
+        public DbSet<InstallationReportFile> InstallationReportFiles { get; set; }
         public DbSet<IssuedBy> IssuedBy { get; set; }
         public DbSet<MaterialRequesition_Slip> MaterialRequisition_Slip { get; set; }
         public DbSet<Materials> Materials { get; set; }
@@ -51,6 +53,7 @@ namespace APINIMIRHEMAA.Data
         public DbSet<Purchased_Material> Purchased_Material { get; set; }
         public DbSet<Quotation_Items> Quotation_Items { get; set; }
         public DbSet<QuotationItemMaterial> QuotationItemMaterials { get; set; }
+        public DbSet<QuotationItemStore> QuotationItemStores { get; set; }
         public DbSet<Quotation_Store> Quotation_Store { get; set; }
         public DbSet<JobOrderComment> JobOrderComments { get; set; }
         public DbSet<Employee> Employee { get; set; }
@@ -59,6 +62,13 @@ namespace APINIMIRHEMAA.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<ClientAccessGrant>(entity =>
+            {
+                entity.ToTable("ClientAccessGrants");
+                entity.HasKey(grant => new { grant.Client_ID, grant.User_ID });
+                entity.Property(grant => grant.GrantedAtUtc)
+                    .HasDefaultValueSql("SYSUTCDATETIME()");
+            });
             modelBuilder.Entity<ClientQuotationSequence>(entity =>
             {
                 entity.ToTable("ClientQuotationSequence");
@@ -85,6 +95,19 @@ namespace APINIMIRHEMAA.Data
                     .HasForeignKey(file => file.JobOrderID)
                     .OnDelete(DeleteBehavior.Cascade);
                 entity.HasIndex(file => file.JobOrderID);
+            });
+            modelBuilder.Entity<InstallationReportFile>(entity =>
+            {
+                entity.ToTable("InstallationReportFiles");
+                entity.HasKey(file => file.InstallationReportFile_ID);
+                entity.Property(file => file.File_Data)
+                    .HasColumnType("varbinary(max)")
+                    .IsRequired();
+                entity.HasOne<InstallationReport>()
+                    .WithMany()
+                    .HasForeignKey(file => file.InstallationReport_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(file => file.InstallationReport_ID);
             });
             modelBuilder.Entity<ServiceInvoiceItem>(entity =>
             {
@@ -178,6 +201,20 @@ namespace APINIMIRHEMAA.Data
                     .WithMany()
                     .HasForeignKey(material => material.Material_ID)
                     .OnDelete(DeleteBehavior.Restrict);
+            });
+            modelBuilder.Entity<QuotationItemStore>(entity =>
+            {
+                entity.ToTable("QuotationItemStores");
+                entity.HasKey(link => new { link.QI_ID, link.QS_ID });
+                entity.HasOne<Quotation_Items>()
+                    .WithMany()
+                    .HasForeignKey(link => link.QI_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne<Quotation_Store>()
+                    .WithMany()
+                    .HasForeignKey(link => link.QS_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(link => link.QS_ID);
             });
             modelBuilder.Entity<UserSignature>(entity =>
             {
@@ -332,6 +369,22 @@ namespace APINIMIRHEMAA.Data
 
             foreach (var entityType in entityTypes)
             {
+                if (entityType.ClrType == typeof(ClientEntity))
+                {
+                    modelBuilder.Entity<ClientEntity>().HasQueryFilter(client =>
+                        HasGlobalRecordAccess ||
+                        (CurrentUserId.HasValue && client.CreatedByUserId == CurrentUserId) ||
+                        (IsDepartmentManager &&
+                            CurrentUserId.HasValue &&
+                            CurrentDepartmentId.HasValue &&
+                            client.CreatedByDepartmentId == CurrentDepartmentId) ||
+                        (CurrentUserId.HasValue &&
+                            ClientAccessGrants.Any(grant =>
+                                grant.Client_ID == client.Client_ID &&
+                                grant.User_ID == CurrentUserId)));
+                    continue;
+                }
+
                 filterMethod.MakeGenericMethod(entityType.ClrType)
                     .Invoke(this, new object[] { modelBuilder });
             }
@@ -580,6 +633,12 @@ namespace APINIMIRHEMAA.Data
                 return item == null ? null : FindQuotationStore(item.QS_ID)?.Quotation_ID;
             }
 
+            if (entry.Entity is QuotationItemStore quotationItemStore)
+            {
+                var item = FindQuotationItem(quotationItemStore.QI_ID);
+                return item == null ? null : FindQuotationStore(item.QS_ID)?.Quotation_ID;
+            }
+
             if (entry.Entity is Conforme conforme)
             {
                 return conforme.Quotation_ID;
@@ -648,6 +707,15 @@ namespace APINIMIRHEMAA.Data
             if (entry.Entity is InstallationReport installationReport)
             {
                 return ResolveQuotationIdForJobOrder(installationReport.JobOrder_ID);
+            }
+
+            if (entry.Entity is InstallationReportFile installationReportFile)
+            {
+                var report = InstallationReport.Local.FirstOrDefault(record =>
+                    record.InstallationReport_ID == installationReportFile.InstallationReport_ID)
+                    ?? InstallationReport.AsNoTracking().FirstOrDefault(record =>
+                        record.InstallationReport_ID == installationReportFile.InstallationReport_ID);
+                return report == null ? null : ResolveQuotationIdForJobOrder(report.JobOrder_ID);
             }
 
             if (entry.Entity is Installation_Schedule installationSchedule)

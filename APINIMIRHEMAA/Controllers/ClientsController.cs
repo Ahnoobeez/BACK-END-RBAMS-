@@ -25,7 +25,7 @@ namespace APINIMIRHEMAA.Controllers
             _encryptionService = encryptionService;
         }
 
-        private static IQueryable<ClientEntity> ClientsWithTelephoneAsText(DbSet<ClientEntity> clients)
+        internal static IQueryable<ClientEntity> ClientsWithTelephoneAsText(DbSet<ClientEntity> clients)
         {
             return clients.FromSqlRaw(
                 "SELECT [Client_ID], [CreatedBy], [CreatedByUserId], [CreatedByDepartmentId], COALESCE([Client_Name], N'') AS [Client_Name], COALESCE(CONVERT(nvarchar(16), [Client_Telephone]), N'') AS [Client_Telephone], [Contact_Person], [Business_Style], [Client_EmailAddress], COALESCE([TermsAndCondition], N'') AS [TermsAndCondition], [Company_Address], COALESCE([TIN], N'') AS [TIN], [Payment_Terms], COALESCE([Price_Per_Square_Inch], CONVERT(decimal(18,4), 0)) AS [Price_Per_Square_Inch] FROM [dbo].[Clients]");

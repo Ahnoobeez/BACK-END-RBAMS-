@@ -28,6 +28,8 @@ namespace APINIMIRHEMAA.Models
         [Column(TypeName = "decimal(18,2)")]
         public decimal? Total_Amount { get; set; }
         public int QS_ID { get; set; }
+        [NotMapped]
+        public List<int> QuotationStoreIds { get; set; } = new();
         public ICollection<QuotationItemMaterial> Materials { get; set; } = new List<QuotationItemMaterial>();
     }
 }

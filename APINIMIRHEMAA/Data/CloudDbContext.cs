@@ -14,6 +14,7 @@ namespace APINIMIRHEMAA.Data
             _localDb = localDb;
         }
         public DbSet<ClientEntity> Clients { get; set; }
+        public DbSet<ClientAccessGrant> ClientAccessGrants { get; set; }
         public DbSet<Quotation> Quotation { get; set; }
         public DbSet<ClientQuotationSequence> ClientQuotationSequences { get; set; }
         public DbSet<ClientQuotationReservation> ClientQuotationReservations { get; set; }
@@ -43,6 +44,13 @@ namespace APINIMIRHEMAA.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<ClientAccessGrant>(entity =>
+            {
+                entity.ToTable("ClientAccessGrants");
+                entity.HasKey(grant => new { grant.Client_ID, grant.User_ID });
+                entity.Property(grant => grant.GrantedAtUtc)
+                    .HasDefaultValueSql("SYSUTCDATETIME()");
+            });
             modelBuilder.Entity<ClientQuotationSequence>(entity =>
             {
                 entity.ToTable("ClientQuotationSequence");
@@ -148,6 +156,22 @@ namespace APINIMIRHEMAA.Data
 
             foreach (var entityType in entityTypes)
             {
+                if (entityType.ClrType == typeof(ClientEntity))
+                {
+                    modelBuilder.Entity<ClientEntity>().HasQueryFilter(client =>
+                        HasGlobalRecordAccess ||
+                        (CurrentUserId.HasValue && client.CreatedByUserId == CurrentUserId) ||
+                        (IsDepartmentManager &&
+                            CurrentUserId.HasValue &&
+                            CurrentDepartmentId.HasValue &&
+                            client.CreatedByDepartmentId == CurrentDepartmentId) ||
+                        (CurrentUserId.HasValue &&
+                            ClientAccessGrants.Any(grant =>
+                                grant.Client_ID == client.Client_ID &&
+                                grant.User_ID == CurrentUserId)));
+                    continue;
+                }
+
                 filterMethod.MakeGenericMethod(entityType.ClrType)
                     .Invoke(this, new object[] { modelBuilder });
             }

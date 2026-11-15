@@ -1,4 +1,5 @@
 using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,32 +12,37 @@ namespace APINIMIRHEMAA.Controllers
     public class AnalyticsController : ControllerBase
     {
         private readonly LocalDbContext _localDb;
+        private readonly EncryptionService _encryptionService;
 
-        public AnalyticsController(LocalDbContext localDb)
+        public AnalyticsController(LocalDbContext localDb, EncryptionService encryptionService)
         {
             _localDb = localDb;
+            _encryptionService = encryptionService;
         }
 
         [HttpGet("GetCompanyOverview")]
         public ActionResult GetCompanyOverview()
         {
             var jobOrders = _localDb.JobOrder
+                .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Select(job => new { job.Title, job.Status })
                 .ToList();
             var jobStatuses = jobOrders.Select(job => GetStatusGroup(job.Status)).ToList();
             var inventory = _localDb.Inventory
+                .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Select(item => new { item.Balance, item.Status })
                 .ToList();
             var requisitionStatuses = _localDb.MaterialRequisition_Slip
+                .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Select(request => request.Status)
                 .ToList();
             var today = DateOnly.FromDateTime(DateTime.Today);
             var upcomingInstallations = (
-                from schedule in _localDb.Installation_Schedule.AsNoTracking()
-                join job in _localDb.JobOrder.AsNoTracking()
+                from schedule in _localDb.Installation_Schedule.IgnoreQueryFilters().AsNoTracking()
+                join job in _localDb.JobOrder.IgnoreQueryFilters().AsNoTracking()
                     on schedule.JobOrder_ID equals job.JobOrder_ID
                 where schedule.Date >= today
                 orderby schedule.Date, schedule.Time
@@ -53,8 +59,8 @@ namespace APINIMIRHEMAA.Controllers
 
             return Ok(new
             {
-                clientCount = _localDb.Clients.AsNoTracking().Count(),
-                quotationCount = _localDb.Quotation.AsNoTracking().Count(),
+                clientCount = _localDb.Clients.IgnoreQueryFilters().AsNoTracking().Count(),
+                quotationCount = _localDb.Quotation.IgnoreQueryFilters().AsNoTracking().Count(),
                 jobOrderCount = jobOrders.Count,
                 jobOrderStatuses = new
                 {
@@ -79,6 +85,57 @@ namespace APINIMIRHEMAA.Controllers
                     mall_Hours = schedule.Mall_Hours,
                     status = schedule.Status
                 })
+            });
+        }
+
+        [Authorize(Policy = "marketing")]
+        [HttpGet("GetMarketingOverview")]
+        public async Task<ActionResult> GetMarketingOverview(CancellationToken cancellationToken)
+        {
+            var clients = await ClientsController.ClientsWithTelephoneAsText(_localDb.Clients)
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Select(client => new
+                {
+                    client.Client_ID,
+                    client.Client_Name,
+                    client.Client_Telephone,
+                    client.Business_Style,
+                    client.Payment_Terms
+                })
+                .ToListAsync(cancellationToken);
+            var clientRows = clients.Select(client => new
+            {
+                client.Client_ID,
+                client.Client_Name,
+                client.Client_Telephone,
+                Business_Style = !string.IsNullOrWhiteSpace(client.Business_Style) &&
+                    client.Business_Style.StartsWith("CfDJ8", StringComparison.Ordinal)
+                    ? _encryptionService.TryDecrypt(client.Business_Style)
+                    : client.Business_Style,
+                client.Payment_Terms
+            });
+            var quotations = await _localDb.Quotation
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Select(quotation => new
+                {
+                    quotation.Client_ID,
+                    quotation.Overall_Total,
+                    quotation.Status
+                })
+                .ToListAsync(cancellationToken);
+            var jobs = await _localDb.JobOrder
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Select(jobOrder => new { jobOrder.JobOrder_ID })
+                .ToListAsync(cancellationToken);
+
+            return Ok(new
+            {
+                clients = clientRows,
+                quotations,
+                jobs
             });
         }
 

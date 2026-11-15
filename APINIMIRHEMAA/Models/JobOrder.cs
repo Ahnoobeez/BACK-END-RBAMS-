@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
@@ -23,6 +24,9 @@ namespace APINIMIRHEMAA.Models
         public bool Production_Completed { get; set; }
         public bool Technical_Completed { get; set; }
         public List<JobOrderComment> Comments { get; set; } = new();
+        [NotMapped]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? AvailableDeliveryReceiptBranches { get; set; }
 
     }
 }

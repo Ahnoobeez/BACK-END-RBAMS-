@@ -12,6 +12,7 @@ namespace APINIMIRHEMAA.DTO.QuotationItems
         public decimal? Unit_Price { get; set; }
         public decimal? Total_Amount { get; set; }
         public int QS_ID { get; set; }
+        public List<int> QuotationStoreIds { get; set; } = new();
         public List<AddQuotationItemMaterialDto> Materials { get; set; } = new();
     }
 

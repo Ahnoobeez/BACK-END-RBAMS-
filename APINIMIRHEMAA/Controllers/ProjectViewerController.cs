@@ -84,14 +84,35 @@ namespace APINIMIRHEMAA.Controllers
                     .Where(item => storeIds.Contains(item.QS_ID))
                     .ToListAsync();
             var storesById = stores.ToDictionary(store => store.QS_ID);
+            var itemIds = quotationItems.Select(item => item.QI_ID).ToList();
+            var storeLinks = itemIds.Count == 0
+                ? new List<APINIMIRHEMAA.Models.QuotationItemStore>()
+                : await _localDb.QuotationItemStores
+                    .AsNoTracking()
+                    .Where(link => itemIds.Contains(link.QI_ID))
+                    .ToListAsync();
+            var linkedStoreIdsByItem = storeLinks
+                .GroupBy(link => link.QI_ID)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(link => link.QS_ID).ToHashSet());
             var items = quotationItems.Select(item =>
             {
-                storesById.TryGetValue(item.QS_ID, out var store);
+                var storeIdsForItem = linkedStoreIdsByItem.TryGetValue(item.QI_ID, out var linkedStoreIds)
+                    ? linkedStoreIds
+                    : new HashSet<int>();
+                storeIdsForItem.Add(item.QS_ID);
+                item.QuotationStoreIds = storeIdsForItem.OrderBy(storeId => storeId).ToList();
+                var storeNames = item.QuotationStoreIds
+                    .Where(storesById.ContainsKey)
+                    .Select(storeId => storesById[storeId].Store)
+                    .Where(storeName => !string.IsNullOrWhiteSpace(storeName));
                 return new ProjectViewerQuotationItemDto
                 {
                     QuotationItemId = item.QI_ID,
                     QuotationStoreId = item.QS_ID,
-                    Store = store?.Store,
+                    QuotationStoreIds = item.QuotationStoreIds,
+                    Store = string.Join(", ", storeNames),
                     Requirement = item.Requirements,
                     Description = item.Description,
                     Width = item.Width,
@@ -198,6 +219,25 @@ namespace APINIMIRHEMAA.Controllers
                     .AsNoTracking()
                     .Where(record => jobOrderIds.Contains(record.JobOrder_ID))
                     .ToListAsync();
+            var installationReportIds = installationReports
+                .Select(record => record.InstallationReport_ID)
+                .ToArray();
+            var installationReportFiles = installationReportIds.Length == 0
+                ? new List<Models.InstallationReportFile>()
+                : await _localDb.InstallationReportFiles
+                    .AsNoTracking()
+                    .Where(file => installationReportIds.Contains(file.InstallationReport_ID))
+                    .ToListAsync();
+            foreach (var file in installationReportFiles)
+            {
+                file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
+            }
+            foreach (var report in installationReports)
+            {
+                report.SignatureFiles = installationReportFiles
+                    .Where(file => file.InstallationReport_ID == report.InstallationReport_ID)
+                    .ToList();
+            }
             if (!string.IsNullOrWhiteSpace(client?.Business_Style) &&
                 client.Business_Style.StartsWith("CfDJ8", StringComparison.Ordinal))
             {

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Security.Claims;
 using System.Text.Json;
@@ -23,17 +24,20 @@ namespace APINIMIRHEMAA.Controllers
         private CloudDbContext _Clouddb;
         private readonly AccessPermissionService _accessPermissions;
         private readonly EncryptionService _encryptionService;
+        private readonly ILogger<AdminController> _logger;
 
         public AdminController(
             LocalDbContext Localcontext,
             CloudDbContext Cloudcontext,
             AccessPermissionService accessPermissions,
-            EncryptionService encryptionService)
+            EncryptionService encryptionService,
+            ILogger<AdminController> logger)
         {
             _Localdb = Localcontext;
             _Clouddb = Cloudcontext;
             _accessPermissions = accessPermissions;
             _encryptionService = encryptionService;
+            _logger = logger;
         }
 
         [HttpGet("GetLocalAuditTrail")]
@@ -369,8 +373,9 @@ namespace APINIMIRHEMAA.Controllers
             if (details != null)
             {
                 details.DocumentLabel = DecryptProtectedSegments(details.DocumentLabel);
-                DecryptClientSubjects(details.PreviousValues);
-                DecryptClientSubjects(details.CurrentValues);
+                details.ActionDescription = DecryptProtectedSegments(details.ActionDescription ?? "");
+                DecryptProtectedValues(details.PreviousValues);
+                DecryptProtectedValues(details.CurrentValues);
                 details.FormRecords =
                 [
                     new AuditTrailFormRecordDTO
@@ -385,7 +390,9 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var action = details == null
-                ? FormatLegacyAuditAction(storedAction, legacyDocumentLabel)
+                ? FormatLegacyAuditAction(
+                    DecryptProtectedSegments(storedAction),
+                    DecryptProtectedSegments(legacyDocumentLabel ?? ""))
                 : FormatAuditAction(details);
 
             return new AuditTrailEntryDTO
@@ -580,19 +587,19 @@ namespace APINIMIRHEMAA.Controllers
             return FormatAuditEntityName(names.FirstOrDefault() ?? "Form");
         }
 
-        private void DecryptClientSubjects(Dictionary<string, string?>? values)
+        private void DecryptProtectedValues(Dictionary<string, string?>? values)
         {
             if (values == null)
             {
                 return;
             }
 
-            var subjectKeys = values.Keys
-                .Where(key => key.Equals("Client_Subject", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            foreach (var key in subjectKeys)
+            foreach (var key in values.Keys.ToList())
             {
-                values[key] = DecryptProtectedSubject(values[key]);
+                if (values[key] is { } value)
+                {
+                    values[key] = DecryptProtectedSegments(value);
+                }
             }
         }
 
@@ -789,6 +796,368 @@ namespace APINIMIRHEMAA.Controllers
             return _Localdb.Departments.ToList();
         }
 
+        [HttpGet("ClientAccessOptions")]
+        public async Task<IActionResult> GetClientAccessOptions(CancellationToken cancellationToken)
+        {
+            var marketingEmployees = await (
+                from account in MarketingUsers().AsNoTracking()
+                join employee in _Localdb.Employee.AsNoTracking()
+                    on account.Employee_ID equals employee.Employee_Id
+                orderby employee.LastName, employee.FirstName
+                select new ClientAccessEmployeeDto
+                {
+                    User_ID = account.User_ID,
+                    Employee_ID = employee.Employee_Id,
+                    Employee_Name = ((employee.FirstName ?? "") + " " + (employee.LastName ?? "")).Trim(),
+                    Username = account.Username,
+                    IsActive = account.IsActive
+                }).ToListAsync(cancellationToken);
+
+            var clientOwnerIds = await _Localdb.Clients
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(client => client.CreatedByUserId.HasValue)
+                .Select(client => client.CreatedByUserId.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            var marketingOwners = marketingEmployees
+                .Where(employee => clientOwnerIds.Contains(employee.User_ID))
+                .ToList();
+
+            return Ok(new
+            {
+                marketingOwners,
+                marketingEmployees
+            });
+        }
+
+        [HttpGet("ClientAccessOwners/{userId:int}/Clients")]
+        public async Task<IActionResult> GetClientAccessOwnerClients(
+            int userId,
+            CancellationToken cancellationToken)
+        {
+            if (!await MarketingUsers().AnyAsync(
+                    account => account.User_ID == userId,
+                    cancellationToken))
+            {
+                return BadRequest(new { message = "Select an active Marketing employee with a user account." });
+            }
+
+            var clients = await _Localdb.Clients
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(client => client.CreatedByUserId == userId)
+                .OrderBy(client => client.Client_Name)
+                .Select(client => new
+                {
+                    client.Client_ID,
+                    client.Client_Name
+                })
+                .ToListAsync(cancellationToken);
+
+            return Ok(clients);
+        }
+
+        [HttpGet("ClientAccessGrants")]
+        public async Task<ActionResult<List<ClientAccessGrantDto>>> GetClientAccessGrants(
+            CancellationToken cancellationToken)
+        {
+            var grants = await (
+                from grant in _Localdb.ClientAccessGrants.AsNoTracking()
+                join client in _Localdb.Clients.IgnoreQueryFilters().AsNoTracking()
+                    on grant.Client_ID equals client.Client_ID
+                join account in _Localdb.Users.AsNoTracking()
+                    on grant.User_ID equals account.User_ID
+                join employee in _Localdb.Employee.AsNoTracking()
+                    on account.Employee_ID equals employee.Employee_Id
+                orderby client.Client_Name, employee.LastName, employee.FirstName
+                select new ClientAccessGrantDto
+                {
+                    Client_ID = client.Client_ID,
+                    Client_Name = client.Client_Name,
+                    User_ID = account.User_ID,
+                    Employee_Name = ((employee.FirstName ?? "") + " " + (employee.LastName ?? "")).Trim(),
+                    Username = account.Username,
+                    GrantedAtUtc = grant.GrantedAtUtc
+                }).ToListAsync(cancellationToken);
+
+            return Ok(grants);
+        }
+
+        [HttpPost("ClientAccessGrants")]
+        public async Task<IActionResult> GrantClientAccess(
+            [FromBody] SaveClientAccessGrantDto request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Client_ID <= 0 || request.User_ID <= 0)
+            {
+                return BadRequest(new { message = "Select a valid client and Marketing employee." });
+            }
+
+            if (!await _Localdb.Clients.IgnoreQueryFilters()
+                    .AnyAsync(client => client.Client_ID == request.Client_ID, cancellationToken))
+            {
+                return NotFound(new { message = "The selected client could not be found." });
+            }
+
+            if (!await ActiveMarketingUsers()
+                    .AnyAsync(account => account.User_ID == request.User_ID, cancellationToken))
+            {
+                return BadRequest(new { message = "Access can only be granted to an active Marketing employee with a user account." });
+            }
+
+            if (!await _Localdb.ClientAccessGrants.AnyAsync(
+                    grant => grant.Client_ID == request.Client_ID && grant.User_ID == request.User_ID,
+                    cancellationToken))
+            {
+                _Localdb.ClientAccessGrants.Add(new ClientAccessGrant
+                {
+                    Client_ID = request.Client_ID,
+                    User_ID = request.User_ID,
+                    GrantedAtUtc = DateTime.UtcNow
+                });
+                await _Localdb.SaveChangesAsync(cancellationToken);
+            }
+
+            var cloudSyncPending = false;
+            try
+            {
+                var cloudClientExists = await _Clouddb.Clients.IgnoreQueryFilters()
+                    .AnyAsync(client => client.Client_ID == request.Client_ID, cancellationToken);
+                var cloudMarketingUserExists = await _Clouddb.Users.AsNoTracking()
+                    .AnyAsync(account => account.User_ID == request.User_ID && account.IsActive, cancellationToken);
+
+                if (cloudClientExists && cloudMarketingUserExists &&
+                    !await _Clouddb.ClientAccessGrants.AnyAsync(
+                        grant => grant.Client_ID == request.Client_ID && grant.User_ID == request.User_ID,
+                        cancellationToken))
+                {
+                    _Clouddb.ClientAccessGrants.Add(new ClientAccessGrant
+                    {
+                        Client_ID = request.Client_ID,
+                        User_ID = request.User_ID,
+                        GrantedAtUtc = DateTime.UtcNow
+                    });
+                    await _Clouddb.SaveChangesAsync(cancellationToken);
+                }
+            }
+            catch (SqlException exception)
+            {
+                cloudSyncPending = true;
+                _logger.LogWarning(exception, "Client access was saved locally, but cloud synchronization failed.");
+            }
+            catch (TimeoutException exception)
+            {
+                cloudSyncPending = true;
+                _logger.LogWarning(exception, "Client access was saved locally, but cloud synchronization timed out.");
+            }
+
+            return Ok(new
+            {
+                message = cloudSyncPending
+                    ? "Access was saved locally, but the cloud database could not be reached. Retry when the connection is available."
+                    : "Client access granted to the Marketing employee.",
+                cloudSyncPending
+            });
+        }
+
+        [HttpPost("ClientAccessGrants/Bulk")]
+        public async Task<IActionResult> GrantClientAccessToMultipleEmployees(
+            [FromBody] SaveClientAccessGrantsDto request,
+            CancellationToken cancellationToken)
+        {
+            var clientIds = request.Client_IDs?.Distinct().ToList() ?? new List<int>();
+            var userIds = request.User_IDs?.Distinct().ToList() ?? new List<int>();
+            if (request.OwnerUser_ID <= 0 ||
+                clientIds.Count == 0 ||
+                userIds.Count == 0 ||
+                clientIds.Any(id => id <= 0) ||
+                userIds.Any(id => id <= 0) ||
+                userIds.Contains(request.OwnerUser_ID))
+            {
+                return BadRequest(new { message = "Select an owner, at least one client, and at least one different Marketing employee." });
+            }
+
+            if (!await MarketingUsers().AnyAsync(
+                    account => account.User_ID == request.OwnerUser_ID,
+                    cancellationToken))
+            {
+                return BadRequest(new { message = "The selected client owner is not an active Marketing employee." });
+            }
+
+            var ownedClientCount = await _Localdb.Clients
+                .IgnoreQueryFilters()
+                .CountAsync(
+                    client => clientIds.Contains(client.Client_ID) &&
+                        client.CreatedByUserId == request.OwnerUser_ID,
+                    cancellationToken);
+            if (ownedClientCount != clientIds.Count)
+            {
+                return BadRequest(new { message = "One or more selected clients do not belong to the selected employee." });
+            }
+
+            var eligibleUserIds = await ActiveMarketingUsers()
+                .Where(account => userIds.Contains(account.User_ID))
+                .Select(account => account.User_ID)
+                .ToListAsync(cancellationToken);
+            if (eligibleUserIds.Count != userIds.Count)
+            {
+                return BadRequest(new { message = "One or more selected recipients are not active Marketing employees with user accounts." });
+            }
+
+            var existingLocalGrants = await _Localdb.ClientAccessGrants
+                .Where(grant =>
+                    clientIds.Contains(grant.Client_ID) &&
+                    userIds.Contains(grant.User_ID))
+                .ToListAsync(cancellationToken);
+            var existingLocalPairs = existingLocalGrants
+                .Select(grant => (grant.Client_ID, grant.User_ID))
+                .ToHashSet();
+            foreach (var clientId in clientIds)
+            {
+                foreach (var userId in userIds)
+                {
+                    if (!existingLocalPairs.Contains((clientId, userId)))
+                    {
+                        _Localdb.ClientAccessGrants.Add(new ClientAccessGrant
+                        {
+                            Client_ID = clientId,
+                            User_ID = userId,
+                            GrantedAtUtc = DateTime.UtcNow
+                        });
+                    }
+                }
+            }
+            if (_Localdb.ChangeTracker.HasChanges())
+            {
+                await _Localdb.SaveChangesAsync(cancellationToken);
+            }
+
+            var cloudSyncPending = false;
+            try
+            {
+                var cloudClientIds = await _Clouddb.Clients
+                    .IgnoreQueryFilters()
+                    .Where(client =>
+                        clientIds.Contains(client.Client_ID) &&
+                        client.CreatedByUserId == request.OwnerUser_ID)
+                    .Select(client => client.Client_ID)
+                    .ToListAsync(cancellationToken);
+                var cloudUserIds = await _Clouddb.Users.AsNoTracking()
+                    .Where(account => userIds.Contains(account.User_ID) && account.IsActive)
+                    .Select(account => account.User_ID)
+                    .ToListAsync(cancellationToken);
+                if (cloudClientIds.Count > 0 && cloudUserIds.Count > 0)
+                {
+                    var existingCloudGrants = await _Clouddb.ClientAccessGrants
+                        .Where(grant =>
+                            cloudClientIds.Contains(grant.Client_ID) &&
+                            cloudUserIds.Contains(grant.User_ID))
+                        .ToListAsync(cancellationToken);
+                    var existingCloudPairs = existingCloudGrants
+                        .Select(grant => (grant.Client_ID, grant.User_ID))
+                        .ToHashSet();
+                    foreach (var clientId in cloudClientIds)
+                    {
+                        foreach (var userId in cloudUserIds)
+                        {
+                            if (!existingCloudPairs.Contains((clientId, userId)))
+                            {
+                                _Clouddb.ClientAccessGrants.Add(new ClientAccessGrant
+                                {
+                                    Client_ID = clientId,
+                                    User_ID = userId,
+                                    GrantedAtUtc = DateTime.UtcNow
+                                });
+                            }
+                        }
+                    }
+                    if (_Clouddb.ChangeTracker.HasChanges())
+                    {
+                        await _Clouddb.SaveChangesAsync(cancellationToken);
+                    }
+                }
+            }
+            catch (SqlException exception)
+            {
+                cloudSyncPending = true;
+                _logger.LogWarning(exception, "Client access was saved locally, but cloud synchronization failed.");
+            }
+            catch (TimeoutException exception)
+            {
+                cloudSyncPending = true;
+                _logger.LogWarning(exception, "Client access was saved locally, but cloud synchronization timed out.");
+            }
+
+            return Ok(new
+            {
+                message = cloudSyncPending
+                    ? $"Access was granted locally to {userIds.Count} employee(s) for {clientIds.Count} client(s), but cloud synchronization failed. Retry when the connection is available."
+                    : $"Access granted to {userIds.Count} employee(s) for {clientIds.Count} client(s).",
+                cloudSyncPending,
+                clientCount = clientIds.Count,
+                employeeCount = userIds.Count
+            });
+        }
+
+        [HttpDelete("ClientAccessGrants/{clientId:int}/{userId:int}")]
+        public async Task<IActionResult> RevokeClientAccess(
+            int clientId,
+            int userId,
+            CancellationToken cancellationToken)
+        {
+            var localGrant = await _Localdb.ClientAccessGrants
+                .FirstOrDefaultAsync(
+                    grant => grant.Client_ID == clientId && grant.User_ID == userId,
+                    cancellationToken);
+            if (localGrant != null)
+            {
+                _Localdb.ClientAccessGrants.Remove(localGrant);
+                await _Localdb.SaveChangesAsync(cancellationToken);
+            }
+
+            var cloudSyncPending = false;
+            var cloudGrantRemoved = false;
+            try
+            {
+                var cloudGrant = await _Clouddb.ClientAccessGrants
+                    .FirstOrDefaultAsync(
+                        grant => grant.Client_ID == clientId && grant.User_ID == userId,
+                        cancellationToken);
+                if (cloudGrant != null)
+                {
+                    _Clouddb.ClientAccessGrants.Remove(cloudGrant);
+                    await _Clouddb.SaveChangesAsync(cancellationToken);
+                    cloudGrantRemoved = true;
+                }
+            }
+            catch (SqlException exception)
+            {
+                cloudSyncPending = true;
+                _logger.LogWarning(exception, "Client access was revoked locally, but cloud synchronization failed.");
+            }
+            catch (TimeoutException exception)
+            {
+                cloudSyncPending = true;
+                _logger.LogWarning(exception, "Client access was revoked locally, but cloud synchronization timed out.");
+            }
+
+            if (localGrant == null && !cloudGrantRemoved && !cloudSyncPending)
+            {
+                return NotFound(new { message = "The client access grant could not be found." });
+            }
+
+            return Ok(new
+            {
+                message = cloudSyncPending
+                    ? localGrant == null
+                        ? "Cloud access could not be verified because the cloud database is unavailable."
+                        : "Access was revoked locally, but the cloud database could not be reached. Retry when the connection is available."
+                    : "Client access revoked.",
+                cloudSyncPending
+            });
+        }
+
         [HttpGet("AccessPermissions")]
         public async Task<ActionResult<List<AccessPermissionValueDto>>> GetAccessPermissions(
             [FromQuery] int? roleId,
@@ -874,5 +1243,20 @@ namespace APINIMIRHEMAA.Controllers
 
             return Ok(new { message = "Access permissions saved successfully." });
         }
+
+        private IQueryable<Users> MarketingUsers()
+        {
+            return
+                from account in _Localdb.Users
+                join employee in _Localdb.Employee
+                    on account.Employee_ID equals employee.Employee_Id
+                join department in _Localdb.Departments
+                    on (employee.Department_ID ?? account.Department_ID) equals department.Department_ID
+                where department.Department_Name.ToUpper().Contains("MARKETING")
+                select account;
+        }
+
+        private IQueryable<Users> ActiveMarketingUsers() =>
+            MarketingUsers().Where(account => account.IsActive);
     }
 }
