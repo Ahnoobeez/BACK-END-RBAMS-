@@ -32,6 +32,58 @@ namespace APINIMIRHEMAA.Controllers
 
         // ------------------------------- QUOTATION -------------------------------
 
+        [HttpGet("GetLocalQuotationMaterials")]
+        public async Task<IActionResult> GetLocalQuotationMaterials()
+        {
+            var materials = await _Localdb.Materials
+                .AsNoTracking()
+                .OrderBy(material => material.Item_Name)
+                .Select(material => new
+                {
+                    material.Material_ID,
+                    material.Code_Name,
+                    material.Item_Name,
+                    material.Category,
+                    material.Unit
+                })
+                .ToListAsync();
+
+            return Ok(materials);
+        }
+
+        [HttpGet("GetLocalQuotationInventory")]
+        public async Task<IActionResult> GetLocalQuotationInventory()
+        {
+            var inventoryRecords = await _Localdb.Inventory
+                .AsNoTracking()
+                .ToListAsync();
+            var pendingRequests = await _Localdb.MaterialRequisition_Slip
+                .AsNoTracking()
+                .Where(request => request.Status == null || request.Status.Trim() == "" ||
+                    request.Status.Trim().ToUpper() == "PENDING")
+                .GroupBy(request => request.Material_ID)
+                .Select(group => new
+                {
+                    MaterialId = group.Key,
+                    Quantity = group.Sum(request => request.Quantity ?? 0)
+                })
+                .ToDictionaryAsync(group => group.MaterialId, group => group.Quantity);
+
+            foreach (var inventory in inventoryRecords)
+            {
+                inventory.Request = pendingRequests.TryGetValue(inventory.Material_ID, out var quantity)
+                    ? quantity
+                    : 0;
+                InventoryRules.Recalculate(inventory);
+            }
+
+            return Ok(inventoryRecords.Select(inventory => new
+            {
+                inventory.Material_ID,
+                inventory.Balance
+            }));
+        }
+
         [HttpGet("GetLocalQuotations")]
         public async Task<ActionResult<List<Quotation>>> GetAllLocalQuotations()
         {
