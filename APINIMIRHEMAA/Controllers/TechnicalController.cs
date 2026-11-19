@@ -16,22 +16,36 @@ namespace APINIMIRHEMAA.Controllers
     {
         private LocalDbContext _Localdb;
         private CloudDbContext _CloudDb;
+        private readonly EncryptionService _encryptionService;
+        private readonly NotificationService _notificationService;
 
-        public TechnicalController(LocalDbContext Localcontext, CloudDbContext Cloudcontext)
+        public TechnicalController(
+            LocalDbContext Localcontext,
+            CloudDbContext Cloudcontext,
+            EncryptionService encryptionService,
+            NotificationService notificationService)
         {
             _Localdb = Localcontext;
             _CloudDb = Cloudcontext;
+            _encryptionService = encryptionService;
+            _notificationService = notificationService;
+        }
+
+        private IQueryable<JobOrder> GetTechnicalVisibleJobOrders()
+        {
+            return _Localdb.JobOrder.IgnoreQueryFilters();
         }
 
         //  ----------------------------------- JOB ORDER -----------------------------------
 
         [HttpGet("GetLocalJobOrder")]
-        public List<JobOrder> GetAllJobOrder()
+        public async Task<List<JobOrder>> GetAllJobOrder()
         {
-            return _Localdb.JobOrder
+            var jobOrders = await GetTechnicalVisibleJobOrders()
                 .AsNoTracking()
-                .Include(jobOrder => jobOrder.Comments)
-                .ToList();
+                .ToListAsync();
+            await JobOrderClientQueries.PopulateAsync(_Localdb, jobOrders, HttpContext.RequestAborted);
+            return jobOrders;
         }
 
         [HttpPost("StartLocalJobOrder")]
@@ -42,7 +56,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("A valid Job Order ID is required.");
             }
 
-            if (!await _Localdb.JobOrder.AnyAsync(record => record.JobOrder_ID == jobOrderId))
+            if (!await GetTechnicalVisibleJobOrders().AnyAsync(record => record.JobOrder_ID == jobOrderId))
             {
                 return NotFound("Job Order not found.");
             }
@@ -54,9 +68,8 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound("Job Order not found.");
             }
 
-            var jobOrder = await _Localdb.JobOrder
+            var jobOrder = await GetTechnicalVisibleJobOrders()
                 .AsNoTracking()
-                .Include(record => record.Comments)
                 .FirstAsync(record => record.JobOrder_ID == jobOrderId);
             return Ok(jobOrder);
         }
@@ -69,12 +82,13 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("Invalid Job Order ID.");
             }
 
-            if (!await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == jobOrderId))
+            if (!await GetTechnicalVisibleJobOrders().AnyAsync(jobOrder => jobOrder.JobOrder_ID == jobOrderId))
             {
                 return NotFound("Job Order not found.");
             }
 
             var items = await _Localdb.JobOrderItems
+                .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Where(item => item.JobOrder_ID == jobOrderId)
                 .OrderBy(item => item.JobOrderItems_ID)
@@ -83,20 +97,56 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpGet("GetLocalJobOrderByID")]
-        public ActionResult<JobOrder> GetLocalJobOrderByID(int id)
+        public async Task<ActionResult<JobOrder>> GetLocalJobOrderByID(int id)
         {
             if (id == 0)
             {
                 return BadRequest("Invalid client ID.");
             }
-            var jobOrder = _Localdb.JobOrder
-                .Include(x => x.Comments)
-                .FirstOrDefault(x => x.JobOrder_ID == id);
+            var jobOrder = await GetTechnicalVisibleJobOrders()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.JobOrder_ID == id, HttpContext.RequestAborted);
             if (jobOrder == null)
             {
                 return NotFound();
             }
+            await JobOrderClientQueries.PopulateAsync(
+                _Localdb,
+                new List<JobOrder> { jobOrder },
+                HttpContext.RequestAborted);
             return Ok(jobOrder);
+        }
+
+        [HttpGet("GetLocalJobOrderComments")]
+        public async Task<ActionResult<JobOrderCommentPage>> GetLocalJobOrderComments(
+            int jobOrderId,
+            int? beforeCommentId,
+            int? afterCommentId,
+            int take = 20,
+            CancellationToken cancellationToken = default)
+        {
+            if (jobOrderId <= 0 ||
+                (beforeCommentId.HasValue && beforeCommentId.Value <= 0) ||
+                (afterCommentId.HasValue && afterCommentId.Value <= 0) ||
+                (beforeCommentId.HasValue && afterCommentId.HasValue) ||
+                take < 1 || take > 50)
+            {
+                return BadRequest("Invalid Job Order comment paging parameters.");
+            }
+            if (!await GetTechnicalVisibleJobOrders()
+                .AnyAsync(jobOrder => jobOrder.JobOrder_ID == jobOrderId, cancellationToken))
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var page = await JobOrderCommentQueries.GetPageAsync(
+                _Localdb,
+                jobOrderId,
+                beforeCommentId,
+                afterCommentId,
+                take,
+                cancellationToken);
+            return Ok(page);
         }
 
         [HttpPost("AddLocalJobOrderComment")]
@@ -114,7 +164,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("A comment is required.");
             }
 
-            if (!await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == request.JobOrder_ID))
+            if (!await GetTechnicalVisibleJobOrders().AnyAsync(jobOrder => jobOrder.JobOrder_ID == request.JobOrder_ID))
             {
                 return NotFound("Job Order not found.");
             }
@@ -134,11 +184,12 @@ namespace APINIMIRHEMAA.Controllers
             };
             _Localdb.JobOrderComments.Add(comment);
             await _Localdb.SaveChangesAsync();
+            await _notificationService.NotifyJobOrderCommentAsync(comment);
             return Ok(comment);
         }
 
         [HttpPost("AddLocalJobOrder")]
-        public ActionResult<JobOrder> AddLocalJobOrder(JobOrder jobOrder)
+        public async Task<ActionResult<JobOrder>> AddLocalJobOrder(JobOrder jobOrder)
         {
             if (!ModelState.IsValid)
             {
@@ -156,7 +207,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 purchaseOrder.Status = "Completed";
             }
-            _Localdb.SaveChanges();
+            await _Localdb.SaveChangesAsync();
+            await _notificationService.NotifyJobOrderReadersAsync(jobOrder.JobOrder_ID);
             return Ok(jobOrder);
         }
 
@@ -168,7 +220,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("A valid Job Order ID is required.");
             }
 
-            if (!await _Localdb.JobOrder.AnyAsync(record => record.JobOrder_ID == jobOrderId))
+            if (!await GetTechnicalVisibleJobOrders().AnyAsync(record => record.JobOrder_ID == jobOrderId))
             {
                 return NotFound("Job Order not found.");
             }
@@ -177,14 +229,14 @@ namespace APINIMIRHEMAA.Controllers
                 $"UPDATE [dbo].[JobOrder] SET [Technical_Completed] = 1, [Status] = CASE WHEN [Production_Completed] = 1 THEN N'Completed' ELSE N'In Progress (1/2)' END WHERE [JobOrder_ID] = {jobOrderId} AND ([Technical_Completed] = 1 OR [Status] = N'In Progress (0/2)')");
             if (updatedRows == 0)
             {
-                if (!await _Localdb.JobOrder.AnyAsync(record => record.JobOrder_ID == jobOrderId))
+                if (!await GetTechnicalVisibleJobOrders().AnyAsync(record => record.JobOrder_ID == jobOrderId))
                 {
                     return NotFound("Job Order not found.");
                 }
                 return Conflict("Open the Job Order before marking Technical work complete.");
             }
 
-            var jobOrder = await _Localdb.JobOrder
+            var jobOrder = await GetTechnicalVisibleJobOrders()
                 .AsNoTracking()
                 .FirstAsync(record => record.JobOrder_ID == jobOrderId);
             return Ok(jobOrder);
@@ -312,6 +364,46 @@ namespace APINIMIRHEMAA.Controllers
         public List<Graphics> GetAllGraphics()
         {
             return _Localdb.Graphics.ToList();
+        }
+
+        [HttpGet("GetLocalJobOrderGraphics")]
+        public async Task<ActionResult<List<Graphics>>> GetLocalJobOrderGraphics(int jobOrderId)
+        {
+            if (jobOrderId <= 0)
+            {
+                return BadRequest("A valid Job Order ID is required.");
+            }
+
+            var jobOrder = await GetTechnicalVisibleJobOrders()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(record => record.JobOrder_ID == jobOrderId);
+            if (jobOrder == null)
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var quotationId = await _Localdb.Conforme
+                .IgnoreQueryFilters()
+                .Where(conforme => conforme.FileID == jobOrder.Conforme_FileID)
+                .Select(conforme => (int?)conforme.Quotation_ID)
+                .FirstOrDefaultAsync();
+            if (!quotationId.HasValue)
+            {
+                return Ok(new List<Graphics>());
+            }
+
+            var graphics = await _Localdb.Graphics
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(graphic => graphic.Quotation_ID == quotationId.Value)
+                .OrderBy(graphic => graphic.FileID)
+                .ToListAsync();
+            foreach (var graphic in graphics)
+            {
+                graphic.FileData = _encryptionService.TryDecrypt(graphic.FileData);
+            }
+
+            return Ok(graphics);
         }
 
         [HttpGet("GetLocalGraphicsByID")]
@@ -471,14 +563,22 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("AddLocalMaterialRequesitionSlips")]
-        public ActionResult<MaterialRequesition_Slip> AddLocalMaterialRequesitionSlips(MaterialRequesition_Slip materialRequesitionSlip)
+        public async Task<ActionResult<MaterialRequesition_Slip>> AddLocalMaterialRequesitionSlips(
+            MaterialRequesition_Slip materialRequesitionSlip,
+            CancellationToken cancellationToken)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(cancellationToken);
+            materialRequesitionSlip.Status = "Pending";
             _Localdb.Add(materialRequesitionSlip);
-            _Localdb.SaveChanges();
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            await _notificationService.NotifyMaterialRequisitionSubmittedAsync(
+                new[] { materialRequesitionSlip },
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return Ok(materialRequesitionSlip);
         }
 

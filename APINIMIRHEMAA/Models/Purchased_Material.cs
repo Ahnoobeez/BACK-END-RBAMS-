@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace APINIMIRHEMAA.Models
 {
@@ -20,5 +21,7 @@ namespace APINIMIRHEMAA.Models
         public int Unit_price { get; set; }
         public int Amount { get; set; }
         public int Material_ID { get; set; }
+        [NotMapped]
+        public bool IsLockedByMaterialRequisition { get; set; }
     }
 }

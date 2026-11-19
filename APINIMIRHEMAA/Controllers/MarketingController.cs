@@ -2,6 +2,7 @@ using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.InstallationReport;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
 using APINIMIRHEMAA.DTO.JobOrders;
+using APINIMIRHEMAA.DTO;
 using APINIMIRHEMAA.DTO.QuotationItems;
 using APINIMIRHEMAA.DTO.ServiceInvoice;
 using APINIMIRHEMAA.Models;
@@ -23,11 +24,22 @@ namespace APINIMIRHEMAA.Controllers
         private LocalDbContext _Localdb;
         private CloudDbContext _CloudDb;
         private readonly EncryptionService _encryptionService;
-        public MarketingController(LocalDbContext Localcontext, CloudDbContext Cloudcontext, EncryptionService encryptionService)
+        private readonly NotificationService _notificationService;
+        public MarketingController(
+            LocalDbContext Localcontext,
+            CloudDbContext Cloudcontext,
+            EncryptionService encryptionService,
+            NotificationService notificationService)
         {
             _Localdb = Localcontext;
             _CloudDb = Cloudcontext;
             _encryptionService = encryptionService;
+            _notificationService = notificationService;
+        }
+
+        private IQueryable<JobOrder> GetMarketingVisibleJobOrders()
+        {
+            return _Localdb.JobOrder.IgnoreQueryFilters();
         }
 
         // ------------------------------- QUOTATION -------------------------------
@@ -1400,12 +1412,13 @@ namespace APINIMIRHEMAA.Controllers
         // ------------------------------- JOB ORDER -------------------------------
 
         [HttpGet("GetLocalJobOrder")]
-        public List<JobOrder> GetAllJobOrder()
+        public async Task<List<JobOrder>> GetAllJobOrder()
         {
-            return _Localdb.JobOrder
+            var jobOrders = await GetMarketingVisibleJobOrders()
                 .AsNoTracking()
-                .Include(jobOrder => jobOrder.Comments)
-                .ToList();
+                .ToListAsync(HttpContext.RequestAborted);
+            await JobOrderClientQueries.PopulateAsync(_Localdb, jobOrders, HttpContext.RequestAborted);
+            return jobOrders;
         }
 
         [HttpGet("GetCompletedLocalJobOrders")]
@@ -1418,7 +1431,6 @@ namespace APINIMIRHEMAA.Controllers
                     jobOrder.Status == "Completed" ||
                     jobOrder.Status == "Complete" ||
                     jobOrder.Status == "complited")
-                .Include(jobOrder => jobOrder.Comments)
                 .OrderByDescending(jobOrder => jobOrder.JobOrder_ID)
                 .ToListAsync();
 
@@ -1534,12 +1546,13 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("Invalid Job Order ID.");
             }
 
-            if (!await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == jobOrderId))
+            if (!await GetMarketingVisibleJobOrders().AnyAsync(jobOrder => jobOrder.JobOrder_ID == jobOrderId))
             {
                 return NotFound("Job Order not found.");
             }
 
             var items = await _Localdb.JobOrderItems
+                .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Where(item => item.JobOrder_ID == jobOrderId)
                 .OrderBy(item => item.JobOrderItems_ID)
@@ -1562,7 +1575,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("A comment is required.");
             }
 
-            if (!await _Localdb.JobOrder.AnyAsync(jobOrder => jobOrder.JobOrder_ID == request.JobOrder_ID))
+            if (!await GetMarketingVisibleJobOrders().AnyAsync(jobOrder => jobOrder.JobOrder_ID == request.JobOrder_ID))
             {
                 return NotFound("Job Order not found.");
             }
@@ -1582,6 +1595,7 @@ namespace APINIMIRHEMAA.Controllers
             };
             _Localdb.JobOrderComments.Add(comment);
             await _Localdb.SaveChangesAsync();
+            await _notificationService.NotifyJobOrderCommentAsync(comment);
             return Ok(comment);
         }
 
@@ -1849,24 +1863,60 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpGet("GetLocalJobOrderByID")]
-        public ActionResult<JobOrder> GetLocalJobOrderByID(int id)
+        public async Task<ActionResult<JobOrder>> GetLocalJobOrderByID(int id)
         {
             if (id == 0)
             {
                 return BadRequest("Invalid client ID.");
             }
-            var jobOrder = _Localdb.JobOrder
-                .Include(x => x.Comments)
-                .FirstOrDefault(x => x.JobOrder_ID == id);
+            var jobOrder = await GetMarketingVisibleJobOrders()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.JobOrder_ID == id, HttpContext.RequestAborted);
             if (jobOrder == null)
             {
                 return NotFound();
             }
+            await JobOrderClientQueries.PopulateAsync(
+                _Localdb,
+                new List<JobOrder> { jobOrder },
+                HttpContext.RequestAborted);
             return Ok(jobOrder);
         }
 
+        [HttpGet("GetLocalJobOrderComments")]
+        public async Task<ActionResult<JobOrderCommentPage>> GetLocalJobOrderComments(
+            int jobOrderId,
+            int? beforeCommentId,
+            int? afterCommentId,
+            int take = 20,
+            CancellationToken cancellationToken = default)
+        {
+            if (jobOrderId <= 0 ||
+                (beforeCommentId.HasValue && beforeCommentId.Value <= 0) ||
+                (afterCommentId.HasValue && afterCommentId.Value <= 0) ||
+                (beforeCommentId.HasValue && afterCommentId.HasValue) ||
+                take < 1 || take > 50)
+            {
+                return BadRequest("Invalid Job Order comment paging parameters.");
+            }
+            if (!await GetMarketingVisibleJobOrders()
+                .AnyAsync(jobOrder => jobOrder.JobOrder_ID == jobOrderId, cancellationToken))
+            {
+                return NotFound("Job Order not found.");
+            }
+
+            var page = await JobOrderCommentQueries.GetPageAsync(
+                _Localdb,
+                jobOrderId,
+                beforeCommentId,
+                afterCommentId,
+                take,
+                cancellationToken);
+            return Ok(page);
+        }
+
         [HttpPost("AddLocalJobOrder")]
-        public ActionResult<JobOrder> AddLocalJobOrder([FromBody] CreateJobOrderRequest request)
+        public async Task<ActionResult<JobOrder>> AddLocalJobOrder([FromBody] CreateJobOrderRequest request)
         {
             if (!ModelState.IsValid)
             {
@@ -1923,7 +1973,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 purchaseOrder.Status = "Completed";
             }
-            _Localdb.SaveChanges();
+            await _Localdb.SaveChangesAsync();
+            await _notificationService.NotifyJobOrderReadersAsync(jobOrder.JobOrder_ID);
             return Ok(jobOrder);
         }
 
@@ -3822,6 +3873,31 @@ namespace APINIMIRHEMAA.Controllers
             return _Localdb.CollectionReceipt.ToList();
         }
 
+        [HttpGet("GetLocalCollectionReceiptPaymentTransactions")]
+        public async Task<ActionResult<List<PaymentTransactionDto>>> GetLocalCollectionReceiptPaymentTransactions(
+            CancellationToken cancellationToken)
+        {
+            var payments = await _Localdb.PaymentTransactions
+                .AsNoTracking()
+                .OrderByDescending(payment => payment.PaidAtUtc)
+                .ThenByDescending(payment => payment.PaymentTransaction_ID)
+                .Select(payment => new PaymentTransactionDto
+                {
+                    PaymentTransaction_ID = payment.PaymentTransaction_ID,
+                    CollectionReceipt_ID = payment.CollectionReceipt_ID,
+                    JobOrderID = payment.JobOrderID,
+                    Quotation_ID = payment.Quotation_ID,
+                    Amount = payment.Amount,
+                    PaidAtUtc = payment.PaidAtUtc,
+                    CreatedBy = payment.CreatedBy,
+                    CreatedByUserId = payment.CreatedByUserId,
+                    CreatedByDepartmentId = payment.CreatedByDepartmentId
+                })
+                .ToListAsync(cancellationToken);
+
+            return Ok(payments);
+        }
+
         [HttpGet("GetLocalCollectionReceiptsByID")]
         public ActionResult<CollectionReceipt> GetLocalCollectionReceiptsByID(int id)
         {
@@ -3838,44 +3914,150 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [HttpPost("AddLocalCollectionReceipt")]
-        public ActionResult<CollectionReceipt> AddLocalCollectionReceipt(CollectionReceipt collectionReceipt)
+        public async Task<ActionResult<CollectionReceipt>> AddLocalCollectionReceipt(
+            CollectionReceipt collectionReceipt,
+            CancellationToken cancellationToken)
         {
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
-            if (_Localdb.CollectionReceipt.Any(receipt => receipt.JobOrderID == collectionReceipt.JobOrderID))
+
+            var saveResult = await SaveCollectionReceiptsWithPaymentsAsync(
+                new[] { collectionReceipt },
+                cancellationToken);
+            if (saveResult.StatusCode.HasValue)
             {
-                return Conflict("A Collection Receipt already exists for the selected Job Order.");
+                return StatusCode(saveResult.StatusCode.Value, saveResult.Message);
             }
-            collectionReceipt.Status = "Completed";
-            _Localdb.Add(collectionReceipt);
-            _Localdb.SaveChanges();
+
             return Ok(collectionReceipt);
         }
 
         [HttpPost("AddLocalCollectionReceiptBatch")]
         [RequestSizeLimit(100_000_000)]
-        public ActionResult<List<int>> AddLocalCollectionReceiptBatch([FromBody] List<CollectionReceipt> collectionReceiptsFiles)
+        public async Task<ActionResult<List<int>>> AddLocalCollectionReceiptBatch(
+            [FromBody] List<CollectionReceipt> collectionReceiptsFiles,
+            CancellationToken cancellationToken)
         {
             if (collectionReceiptsFiles == null || collectionReceiptsFiles.Count == 0) return BadRequest("No files.");
-            var jobOrderIds = collectionReceiptsFiles.Select(receipt => receipt.JobOrderID).Distinct().ToList();
-            if (_Localdb.CollectionReceipt.Any(receipt => jobOrderIds.Contains(receipt.JobOrderID)))
-            {
-                return Conflict("A Collection Receipt already exists for the selected Job Order.");
-            }
+
             for (int i = 0; i < collectionReceiptsFiles.Count; i++)
 
             {
+                if (collectionReceiptsFiles[i] == null)
+                {
+                    return BadRequest($"File {i + 1}: Invalid file data.");
+                }
                 var error = UploadValidator.ValidateImage(collectionReceiptsFiles[i].FileData);
                 if (error != null) return BadRequest($"File {i + 1}: {error}");
-                collectionReceiptsFiles[i].Status = "Completed";
             }
 
-            _Localdb.CollectionReceipt.AddRange(collectionReceiptsFiles);
-            _Localdb.SaveChanges();
+            var saveResult = await SaveCollectionReceiptsWithPaymentsAsync(
+                collectionReceiptsFiles,
+                cancellationToken);
+            if (saveResult.StatusCode.HasValue)
+            {
+                return StatusCode(saveResult.StatusCode.Value, saveResult.Message);
+            }
+
             return Ok(collectionReceiptsFiles.Select(f => f.CollectionReceipt_ID).ToList());
         }
+
+        private async Task<(int? StatusCode, string? Message)> SaveCollectionReceiptsWithPaymentsAsync(
+            IReadOnlyCollection<CollectionReceipt> receipts,
+            CancellationToken cancellationToken)
+        {
+            var jobOrderIds = receipts.Select(receipt => receipt.JobOrderID).Distinct().ToList();
+            if (jobOrderIds.Any(jobOrderId => jobOrderId <= 0))
+            {
+                return (StatusCodes.Status400BadRequest, "A valid Job Order is required for every Collection Receipt.");
+            }
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            try
+            {
+                if (await _Localdb.CollectionReceipt
+                    .IgnoreQueryFilters()
+                    .AnyAsync(receipt => jobOrderIds.Contains(receipt.JobOrderID), cancellationToken))
+                {
+                    return (StatusCodes.Status409Conflict,
+                        "A Collection Receipt already exists for the selected Job Order.");
+                }
+
+                if (await _Localdb.PaymentTransactions
+                    .IgnoreQueryFilters()
+                    .AnyAsync(payment => jobOrderIds.Contains(payment.JobOrderID), cancellationToken))
+                {
+                    return (StatusCodes.Status409Conflict,
+                        "A payment transaction already exists for the selected Job Order.");
+                }
+
+                var quotationLinks = await (
+                    from jobOrder in _Localdb.JobOrder.IgnoreQueryFilters().AsNoTracking()
+                    join conforme in _Localdb.Conforme.IgnoreQueryFilters().AsNoTracking()
+                        on jobOrder.Conforme_FileID equals conforme.FileID
+                    join quotation in _Localdb.Quotation.IgnoreQueryFilters().AsNoTracking()
+                        on conforme.Quotation_ID equals quotation.Quotation_ID
+                    where jobOrderIds.Contains(jobOrder.JobOrder_ID)
+                    select new
+                    {
+                        JobOrderID = jobOrder.JobOrder_ID,
+                        Quotation_ID = quotation.Quotation_ID,
+                        Amount = quotation.Overall_Total
+                    })
+                    .ToListAsync(cancellationToken);
+                var quotationByJobOrder = quotationLinks.ToDictionary(link => link.JobOrderID);
+                var unresolvedJobOrderIds = jobOrderIds
+                    .Where(jobOrderId => !quotationByJobOrder.ContainsKey(jobOrderId))
+                    .ToList();
+                if (unresolvedJobOrderIds.Count > 0)
+                {
+                    return (StatusCodes.Status400BadRequest,
+                        $"A linked quotation and persisted total could not be resolved for Job Order(s): " +
+                        $"{string.Join(", ", unresolvedJobOrderIds)}. No receipt or payment was saved.");
+                }
+
+                foreach (var receipt in receipts)
+                {
+                    receipt.Status = "Completed";
+                }
+
+                _Localdb.CollectionReceipt.AddRange(receipts);
+                _Localdb.PaymentTransactions.AddRange(jobOrderIds.Select(jobOrderId =>
+                {
+                    var quotation = quotationByJobOrder[jobOrderId];
+                    return new PaymentTransaction
+                    {
+                        CollectionReceipt = receipts.First(receipt => receipt.JobOrderID == jobOrderId),
+                        JobOrderID = jobOrderId,
+                        Quotation_ID = quotation.Quotation_ID,
+                        Amount = quotation.Amount,
+                        PaidAtUtc = DateTime.UtcNow
+                    };
+                }));
+
+                await _Localdb.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return (null, null);
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException exception)
+                when (IsUniqueConstraintViolation(exception))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return (StatusCodes.Status409Conflict,
+                    "A Collection Receipt or payment transaction already exists for the selected Job Order.");
+            }
+        }
+
+        private static bool IsUniqueConstraintViolation(
+            Microsoft.EntityFrameworkCore.DbUpdateException exception) =>
+            exception.GetBaseException() is Microsoft.Data.SqlClient.SqlException
+            {
+                Number: 2601 or 2627
+            };
 
         [HttpPost("UpdateLocalCollectionReceipt")]
         [RequestSizeLimit(10_000_000)]

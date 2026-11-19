@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
 using System.Data;
+using System.Linq.Expressions;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -24,6 +25,7 @@ namespace APINIMIRHEMAA.Controllers
         private CloudDbContext _Clouddb;
         private readonly AccessPermissionService _accessPermissions;
         private readonly EncryptionService _encryptionService;
+        private readonly NotificationService _notificationService;
         private readonly ILogger<AdminController> _logger;
 
         public AdminController(
@@ -31,13 +33,305 @@ namespace APINIMIRHEMAA.Controllers
             CloudDbContext Cloudcontext,
             AccessPermissionService accessPermissions,
             EncryptionService encryptionService,
+            NotificationService notificationService,
             ILogger<AdminController> logger)
         {
             _Localdb = Localcontext;
             _Clouddb = Cloudcontext;
             _accessPermissions = accessPermissions;
             _encryptionService = encryptionService;
+            _notificationService = notificationService;
             _logger = logger;
+        }
+
+        [Authorize(Roles = "Admin,Super Admin")]
+        [HttpGet("CompanyOverviewReport")]
+        public async Task<ActionResult<CompanyOverviewReportDto>> GetCompanyOverviewReport(
+            [FromQuery] DateOnly? from,
+            [FromQuery] DateOnly? to,
+            CancellationToken cancellationToken)
+        {
+            if (!from.HasValue || !to.HasValue)
+            {
+                return BadRequest(new { message = "Both from and to date bounds are required (yyyy-MM-dd)." });
+            }
+
+            if (from.Value > to.Value || to.Value == DateOnly.MaxValue)
+            {
+                return BadRequest(new { message = "The date range is invalid." });
+            }
+
+            var startDate = from.Value;
+            var endDate = to.Value;
+            var startUtc = DateTime.SpecifyKind(startDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+            var endExclusiveUtc = DateTime.SpecifyKind(
+                endDate.AddDays(1).ToDateTime(TimeOnly.MinValue),
+                DateTimeKind.Utc);
+            var generatedAtUtc = DateTime.UtcNow;
+
+            var quotations = _Localdb.Quotation.IgnoreQueryFilters().AsNoTracking();
+            var quotationDates = quotations.Where(quotation =>
+                quotation.Start_Date >= startDate && quotation.Start_Date <= endDate);
+            var quotationStatuses = await BuildCompanyReportSectionAsync(
+                quotationDates,
+                quotations.Where(_ => false),
+                "Quotation.Start_Date",
+                quotation => (decimal?)quotation.Overall_Total,
+                quotation => quotation.Status,
+                cancellationToken);
+
+            var jobs = _Localdb.JobOrder.IgnoreQueryFilters().AsNoTracking();
+            var jobsWithReportDate = jobs.Where(job =>
+                (job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date).HasValue);
+            var jobDates = jobsWithReportDate.Where(job =>
+                (job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date) >= startDate &&
+                (job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date) <= endDate);
+            var jobStatuses = await BuildCompanyReportSectionAsync(
+                jobDates,
+                jobs.Where(job => !(job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date).HasValue),
+                "JobOrder.Date_Delivered ?? Target_Delivery ?? Installation_Date",
+                null,
+                job => job.Status,
+                cancellationToken);
+
+            var purchasedMaterials = _Localdb.Purchased_Material.IgnoreQueryFilters().AsNoTracking();
+            var purchaseDates = purchasedMaterials.Where(purchase =>
+                purchase.Date_Received_Item >= startDate && purchase.Date_Received_Item <= endDate);
+            var purchasedMaterialSummary = await BuildCompanyReportSectionAsync(
+                purchaseDates,
+                purchasedMaterials.Where(_ => false),
+                "Purchased_Material.Date_Received_Item",
+                purchase => (decimal?)purchase.Amount,
+                null,
+                cancellationToken);
+
+            var invoices = _Localdb.ServiceInvoice.IgnoreQueryFilters().AsNoTracking();
+            var invoiceDates = invoices.Where(invoice =>
+                invoice.Invoice_Date >= startDate && invoice.Invoice_Date <= endDate);
+            var invoiceSummary = await BuildCompanyReportSectionAsync(
+                invoiceDates,
+                invoices.Where(_ => false),
+                "ServiceInvoice.Invoice_Date",
+                null,
+                invoice => invoice.Status,
+                cancellationToken);
+            var serviceInvoiceItems = _Localdb.ServiceInvoiceItems
+                .IgnoreQueryFilters()
+                .AsNoTracking();
+            var invoicesWithAmounts = invoiceDates.Where(invoice =>
+                invoice.Amount.HasValue ||
+                serviceInvoiceItems.Any(item => item.ServiceInvoice_ID == invoice.ServiceInvoice_ID));
+            invoiceSummary.AmountRecordCount = await invoicesWithAmounts.LongCountAsync(cancellationToken);
+            if (invoiceSummary.AmountRecordCount > 0)
+            {
+                var headerAmountTotal = await invoiceDates
+                    .Where(invoice => invoice.Amount.HasValue)
+                    .SumAsync(invoice => invoice.Amount, cancellationToken);
+                var itemAmountTotal = await serviceInvoiceItems
+                    .Where(item => invoiceDates.Any(invoice =>
+                        invoice.ServiceInvoice_ID == item.ServiceInvoice_ID &&
+                        !invoice.Amount.HasValue))
+                    .SumAsync(item => (decimal?)item.Amount, cancellationToken);
+                invoiceSummary.AmountTotal = (headerAmountTotal ?? 0m) + (itemAmountTotal ?? 0m);
+            }
+
+            var payments = _Localdb.PaymentTransactions.IgnoreQueryFilters().AsNoTracking();
+            var paymentDates = payments.Where(payment =>
+                payment.PaidAtUtc >= startUtc && payment.PaidAtUtc < endExclusiveUtc);
+            var paymentSummary = await BuildCompanyReportSectionAsync(
+                paymentDates,
+                payments.Where(_ => false),
+                "PaymentTransaction.PaidAtUtc",
+                payment => (decimal?)payment.Amount,
+                null,
+                cancellationToken);
+
+            var requisitions = _Localdb.MaterialRequisition_Slip.IgnoreQueryFilters().AsNoTracking();
+            var requisitionDates = requisitions.Where(requisition =>
+                requisition.Date.HasValue &&
+                requisition.Date.Value >= startDate &&
+                requisition.Date.Value <= endDate);
+            var requisitionSummary = await BuildCompanyReportSectionAsync(
+                requisitionDates,
+                requisitions.Where(requisition => !requisition.Date.HasValue),
+                "MaterialRequisition_Slip.Date",
+                requisition => requisition.Total_Cost.HasValue
+                    ? (decimal?)requisition.Total_Cost.Value
+                    : null,
+                requisition => requisition.Status,
+                cancellationToken);
+
+            var inventory = _Localdb.Inventory.IgnoreQueryFilters().AsNoTracking();
+            var inventorySnapshot = await inventory
+                .GroupBy(_ => 1)
+                .Select(group => new
+                {
+                    ItemCount = group.LongCount(),
+                    BalanceRecordCount = group.LongCount(item => item.Balance.HasValue),
+                    BalanceTotal = group.Sum(item => (long?)item.Balance),
+                    LowOrRestockCount = group.LongCount(item =>
+                        (item.Balance ?? 0) <= 5 ||
+                        (item.Status ?? "").ToLower().Contains("low") ||
+                        (item.Status ?? "").ToLower().Contains("restock"))
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            var inventoryStatuses = await inventory
+                .GroupBy(item => item.Status)
+                .Select(group => new { Status = group.Key, Count = group.LongCount() })
+                .ToListAsync(cancellationToken);
+            var inventoryStatusCounts = new Dictionary<string, long>();
+            foreach (var statusGroup in inventoryStatuses)
+            {
+                AddCount(
+                    inventoryStatusCounts,
+                    NormalizeInventoryStatus(statusGroup.Status),
+                    statusGroup.Count);
+            }
+
+            var schedules = _Localdb.Installation_Schedule.IgnoreQueryFilters().AsNoTracking();
+            var scheduleDates = schedules.Where(schedule =>
+                schedule.Date >= startDate && schedule.Date <= endDate);
+            var scheduleSummary = await BuildCompanyReportSectionAsync(
+                scheduleDates,
+                schedules.Where(_ => false),
+                "Installation_Schedule.Date",
+                null,
+                null,
+                cancellationToken);
+
+            var installationReports = _Localdb.InstallationReport.IgnoreQueryFilters().AsNoTracking();
+            var installationReportDates = installationReports.Where(report =>
+                report.ReportDate.HasValue &&
+                report.ReportDate.Value >= startDate &&
+                report.ReportDate.Value <= endDate);
+            var installationReportSummary = await BuildCompanyReportSectionAsync(
+                installationReportDates,
+                installationReports.Where(report => !report.ReportDate.HasValue),
+                "Installation_Report.ReportDate",
+                null,
+                null,
+                cancellationToken);
+
+            return Ok(new CompanyOverviewReportDto
+            {
+                From = startDate,
+                To = endDate,
+                GeneratedAtUtc = generatedAtUtc,
+                Quotations = quotationStatuses,
+                JobOrders = jobStatuses,
+                PurchasedMaterials = purchasedMaterialSummary,
+                ServiceInvoices = invoiceSummary,
+                CollectionPayments = paymentSummary,
+                Requisitions = requisitionSummary,
+                Inventory = new InventorySnapshotReportDto
+                {
+                    AsOfUtc = generatedAtUtc,
+                    ItemCount = inventorySnapshot?.ItemCount ?? 0,
+                    BalanceRecordCount = inventorySnapshot?.BalanceRecordCount ?? 0,
+                    BalanceTotal = inventorySnapshot?.BalanceTotal,
+                    LowOrRestockCount = inventorySnapshot?.LowOrRestockCount ?? 0,
+                    StatusCounts = inventoryStatusCounts
+                },
+                Installations = new InstallationsReportDto
+                {
+                    Schedules = scheduleSummary,
+                    Reports = installationReportSummary
+                }
+            });
+        }
+
+        private static async Task<CompanyReportSectionDto> BuildCompanyReportSectionAsync<TEntity>(
+            IQueryable<TEntity> dateBoundRecords,
+            IQueryable<TEntity> undatedRecords,
+            string dateField,
+            Expression<Func<TEntity, decimal?>>? amountSelector,
+            Expression<Func<TEntity, string?>>? statusSelector,
+            CancellationToken cancellationToken)
+        {
+            var summary = new CompanyReportSectionDto
+            {
+                DateField = dateField,
+                RecordCount = await dateBoundRecords.LongCountAsync(cancellationToken),
+                UndatedRecordCount = await undatedRecords.LongCountAsync(cancellationToken),
+                HasStatusField = statusSelector != null
+            };
+
+            if (amountSelector != null && summary.RecordCount > 0)
+            {
+                summary.AmountTotal = await dateBoundRecords
+                    .Select(amountSelector)
+                    .SumAsync(cancellationToken);
+                var hasAmount = Expression.Lambda<Func<TEntity, bool>>(
+                    Expression.NotEqual(
+                        amountSelector.Body,
+                        Expression.Constant(null, typeof(decimal?))),
+                    amountSelector.Parameters);
+                summary.AmountRecordCount = await dateBoundRecords.LongCountAsync(
+                    hasAmount,
+                    cancellationToken);
+            }
+
+            if (statusSelector != null)
+            {
+                var statusGroups = await dateBoundRecords
+                    .GroupBy(statusSelector)
+                    .Select(group => new { Status = group.Key, Count = group.LongCount() })
+                    .ToListAsync(cancellationToken);
+                foreach (var statusGroup in statusGroups)
+                {
+                    AddCount(
+                        summary.StatusCounts,
+                        NormalizeReportStatus(statusGroup.Status),
+                        statusGroup.Count);
+                }
+            }
+
+            return summary;
+        }
+
+        private static string NormalizeReportStatus(string? status)
+        {
+            var value = (status ?? "").Trim().ToLowerInvariant();
+            if (value.Length == 0)
+                return "unknown";
+            if (value.Contains("reject") || value.Contains("cancel") || value.Contains("declin"))
+                return "rejected";
+            if (value.Contains("block"))
+                return "blocked";
+            if (value.Contains("approve"))
+                return "approved";
+            if (value.Contains("complete") || value.Contains("deliver") || value == "done")
+                return "completed";
+            if (value.Contains("progress") || value.Contains("ongoing") || value.Contains("active") ||
+                value.Contains("started") || value.Contains("onsite"))
+                return "inProgress";
+            if (value.Contains("pending") || value.Contains("await") || value == "open" ||
+                value.Contains("submitted"))
+                return "pending";
+            return "other";
+        }
+
+        private static string NormalizeInventoryStatus(string? status)
+        {
+            var value = (status ?? "").Trim().ToLowerInvariant();
+            if (value.Length == 0)
+                return "unknown";
+            if (value.Contains("restock") || value.Contains("low"))
+                return "lowOrRestock";
+            if (value.Contains("out") || value.Contains("zero"))
+                return "outOfStock";
+            if (value.Contains("stock") || value.Contains("available"))
+                return "inStock";
+            return "other";
+        }
+
+        private static void AddCount(
+            IDictionary<string, long> counts,
+            string key,
+            long count)
+        {
+            counts.TryGetValue(key, out var currentCount);
+            counts[key] = currentCount + count;
         }
 
         [HttpGet("GetLocalAuditTrail")]
@@ -108,7 +402,10 @@ namespace APINIMIRHEMAA.Controllers
             var records = await _Localdb.MaterialRequisition_Slip
                 .AsNoTracking()
                 .Where(slip =>
-                    slip.FromWho != null && slip.FromWho.Trim().ToUpper() == "ADMIN" &&
+                    slip.FromWho != null &&
+                    (slip.FromWho.Trim().ToUpper() == "ADMIN" ||
+                     slip.FromWho.Trim().ToUpper() == "WAREHOUSE" ||
+                     slip.FromWho.Trim().ToUpper() == "INVENTORY") &&
                     slip.ToWho.Trim().ToUpper() == "SUPPLIER" &&
                     slip.Status != null && slip.Status.Trim().ToUpper() == "APPROVED")
                 .OrderByDescending(slip => slip.Date)
@@ -188,6 +485,9 @@ namespace APINIMIRHEMAA.Controllers
 
             _Localdb.MaterialRequisition_Slip.AddRange(slips);
             await _Localdb.SaveChangesAsync(cancellationToken);
+            await _notificationService.NotifyMaterialRequisitionSubmittedAsync(
+                slips,
+                cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return Ok(new { saved = slips.Count });
         }

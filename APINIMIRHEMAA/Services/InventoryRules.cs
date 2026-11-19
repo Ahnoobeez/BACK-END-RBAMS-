@@ -19,7 +19,8 @@ namespace APINIMIRHEMAA.Services
              department.Contains("inventory", StringComparison.OrdinalIgnoreCase));
 
         public static bool IsAdminSupplierReturn(string? from, string? to) =>
-            string.Equals(from?.Trim(), "Admin", StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(from?.Trim(), "Admin", StringComparison.OrdinalIgnoreCase) ||
+             IsWarehouse(from)) &&
             string.Equals(to?.Trim(), "Supplier", StringComparison.OrdinalIgnoreCase);
 
         public static string? CheckDirection(string? from, string? to) =>

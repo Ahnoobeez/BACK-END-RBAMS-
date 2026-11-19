@@ -49,7 +49,9 @@ builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<PasswordService>();
 builder.Services.AddScoped<WorkflowService>();
 builder.Services.AddScoped<AccessPermissionService>();
+builder.Services.AddScoped<NotificationService>();
 builder.Services.AddScoped<AccessPermissionAuthorizationFilter>();
+builder.Services.AddSingleton<UndoOperationStore>();
 builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
     ModuleAccessAuthorizationHandler>();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -106,6 +108,8 @@ app.UseCors("FrontendPolicy");
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
+
+app.UseMiddleware<UserSignatureAccessMiddleware>();
 
 app.UseAuthorization();
 

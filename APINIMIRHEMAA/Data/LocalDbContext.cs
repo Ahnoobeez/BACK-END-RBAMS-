@@ -1,4 +1,5 @@
-﻿using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.Globalization;
@@ -11,11 +12,16 @@ namespace APINIMIRHEMAA.Data
     public class LocalDbContext : DbContext
     {
         private readonly IHttpContextAccessor _http;
+        private readonly UndoOperationStore _undoOperationStore;
         private int? _currentDepartmentId;
         private bool _currentDepartmentIdResolved;
-        public LocalDbContext(DbContextOptions<LocalDbContext> options, IHttpContextAccessor http) : base(options)
+        public LocalDbContext(
+            DbContextOptions<LocalDbContext> options,
+            IHttpContextAccessor http,
+            UndoOperationStore undoOperationStore) : base(options)
         {
             _http = http;
+            _undoOperationStore = undoOperationStore;
         }
         public DbSet<ClientEntity> Clients { get; set; }
         public DbSet<ClientAccessGrant> ClientAccessGrants { get; set; }
@@ -26,6 +32,7 @@ namespace APINIMIRHEMAA.Data
         public DbSet<JobOrder> JobOrder { get; set; }
         public DbSet<AuditTrail> AuditTrail { get; set; }
         public DbSet<CollectionReceipt> CollectionReceipt { get; set; }
+        public DbSet<PaymentTransaction> PaymentTransactions { get; set; }
         public DbSet<DeliveryFiles> DeliveryFiles { get; set; }
         public DbSet<DeliveryReceipt> DeliveryReceipt { get; set; }
         public DbSet<Graphics> Graphics { get; set; }
@@ -44,6 +51,8 @@ namespace APINIMIRHEMAA.Data
         public DbSet<ServiceInvoiceFile> ServiceInvoiceFiles { get; set; }
         public DbSet<Users> Users { get; set; }
         public DbSet<UserSignature> UserSignatures { get; set; }
+        public DbSet<UserProfilePhoto> UserProfilePhotos { get; set; }
+        public DbSet<Notification> Notifications { get; set; }
         public DbSet<UserSecurityAnswer> UserSecurityAnswers { get; set; }
         public DbSet<PasswordRecoveryChallenge> PasswordRecoveryChallenges { get; set; }
         public DbSet<Roles> Roles { get; set; }
@@ -95,6 +104,36 @@ namespace APINIMIRHEMAA.Data
                     .HasForeignKey(file => file.JobOrderID)
                     .OnDelete(DeleteBehavior.Cascade);
                 entity.HasIndex(file => file.JobOrderID);
+            });
+            modelBuilder.Entity<PaymentTransaction>(entity =>
+            {
+                entity.ToTable("PaymentTransaction");
+                entity.HasKey(payment => payment.PaymentTransaction_ID);
+                entity.Property(payment => payment.Amount).HasColumnType("decimal(18,2)");
+                entity.Property(payment => payment.PaidAtUtc)
+                    .HasColumnType("datetime2(7)")
+                    .HasDefaultValueSql("SYSUTCDATETIME()");
+                entity.HasOne<CollectionReceipt>(payment => payment.CollectionReceipt)
+                    .WithMany()
+                    .HasForeignKey(payment => payment.CollectionReceipt_ID)
+                    .OnDelete(DeleteBehavior.SetNull);
+                entity.HasOne<JobOrder>()
+                    .WithMany()
+                    .HasForeignKey(payment => payment.JobOrderID)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.HasOne<Quotation>()
+                    .WithMany()
+                    .HasForeignKey(payment => payment.Quotation_ID)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.HasIndex(payment => payment.JobOrderID)
+                    .IsUnique()
+                    .HasDatabaseName("UX_PaymentTransaction_JobOrderID");
+                entity.HasIndex(payment => payment.CollectionReceipt_ID)
+                    .IsUnique()
+                    .HasFilter("[CollectionReceipt_ID] IS NOT NULL")
+                    .HasDatabaseName("UX_PaymentTransaction_CollectionReceipt_ID");
+                entity.HasIndex(payment => payment.PaidAtUtc)
+                    .HasDatabaseName("IX_PaymentTransaction_PaidAtUtc");
             });
             modelBuilder.Entity<InstallationReportFile>(entity =>
             {
@@ -228,6 +267,21 @@ namespace APINIMIRHEMAA.Data
                     .HasForeignKey<UserSignature>(signature => signature.User_ID)
                     .OnDelete(DeleteBehavior.Cascade);
             });
+            modelBuilder.Entity<UserProfilePhoto>(entity =>
+            {
+                entity.ToTable("UserProfilePhoto");
+                entity.HasKey(photo => photo.User_ID);
+                entity.Property(photo => photo.PhotoData)
+                    .HasColumnType("varbinary(max)")
+                    .IsRequired();
+                entity.Property(photo => photo.ContentType)
+                    .HasMaxLength(32)
+                    .IsRequired();
+                entity.HasOne<Users>()
+                    .WithOne()
+                    .HasForeignKey<UserProfilePhoto>(photo => photo.User_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
             modelBuilder.Entity<UserSecurityAnswer>(entity =>
             {
                 entity.ToTable("UserSecurityAnswer");
@@ -256,21 +310,155 @@ namespace APINIMIRHEMAA.Data
         // ---------- SaveChanges hooks ----------
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
         {
-            SetCreatedByRecords();
-            var pending = CollectAudits();
+            if (!IsUndoRequest)
+            {
+                SetCreatedByRecords();
+            }
+
+            var batchId = GetAuditBatchId();
+            var pendingUndo = IsUndoRequest ? new List<PendingUndo>() : CollectUndoOperations();
+            var pending = CollectAudits(batchId);
             var result = base.SaveChanges(acceptAllChangesOnSuccess);
+            RecordUndoOperations(batchId, pendingUndo);
             FlushAudits(pending);
             return result;
         }
 
         public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken ct = default)
         {
-            SetCreatedByRecords();
-            var pending = CollectAudits();
+            if (!IsUndoRequest)
+            {
+                SetCreatedByRecords();
+            }
+
+            var batchId = GetAuditBatchId();
+            var pendingUndo = IsUndoRequest ? new List<PendingUndo>() : CollectUndoOperations();
+            var pending = CollectAudits(batchId);
             var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, ct);
+            RecordUndoOperations(batchId, pendingUndo);
             await FlushAuditsAsync(pending, ct);
             return result;
         }
+
+        private bool IsUndoRequest =>
+            _http.HttpContext?.Request.Path.StartsWithSegments(
+                "/api/Undo",
+                StringComparison.OrdinalIgnoreCase) == true;
+
+        private string GetAuditBatchId()
+        {
+            var httpContext = _http.HttpContext;
+            var requestedBatchId = httpContext?.Request.Headers["X-Audit-Batch-Id"].FirstOrDefault();
+            var batchId = Guid.TryParse(requestedBatchId, out var parsedBatchId)
+                ? parsedBatchId.ToString("N")
+                : httpContext?.Items[AuditBatchIdContextKey] as string;
+            batchId ??= Guid.NewGuid().ToString("N");
+            if (httpContext != null)
+            {
+                httpContext.Items[AuditBatchIdContextKey] = batchId;
+            }
+
+            return batchId;
+        }
+
+        private List<PendingUndo> CollectUndoOperations()
+        {
+            ChangeTracker.DetectChanges();
+            return ChangeTracker.Entries()
+                .Where(entry =>
+                    entry.Entity is not APINIMIRHEMAA.Models.AuditTrail &&
+                    entry.Entity is not APINIMIRHEMAA.Models.ClientQuotationSequence &&
+                    entry.Entity is not APINIMIRHEMAA.Models.ClientQuotationReservation &&
+                    (entry.State == EntityState.Added ||
+                     entry.State == EntityState.Modified ||
+                     entry.State == EntityState.Deleted))
+                .Select(entry =>
+                {
+                    var state = entry.State;
+                    var keyValues = state == EntityState.Added
+                        ? new Dictionary<string, object?>()
+                        : CaptureUndoKeyValues(entry);
+                    var previousValues = state == EntityState.Added
+                        ? new Dictionary<string, object?>()
+                        : CaptureUndoValues(
+                            entry,
+                            state == EntityState.Deleted
+                                ? entry.Properties
+                                : entry.Properties.Where(property =>
+                                    property.IsModified && !property.Metadata.IsPrimaryKey()),
+                            useOriginalValues: true);
+
+                    return new PendingUndo(entry, state, keyValues, previousValues);
+                })
+                .ToList();
+        }
+
+        private void RecordUndoOperations(string batchId, List<PendingUndo> pending)
+        {
+            if (pending.Count == 0 || CurrentUserId is not int userId || IsUndoRequest)
+            {
+                return;
+            }
+
+            var changes = pending.Select(item =>
+            {
+                var keyValues = item.State == EntityState.Added
+                    ? CaptureUndoKeyValues(item.Entry)
+                    : item.KeyValues;
+                var expectedValues = item.State switch
+                {
+                    EntityState.Added => new Dictionary<string, object?>(),
+                    EntityState.Modified => CaptureUndoValues(
+                        item.Entry,
+                        item.PreviousValues.Keys.Select(name => item.Entry.Property(name)),
+                        useOriginalValues: false),
+                    _ => new Dictionary<string, object?>()
+                };
+
+                return new UndoEntityChange(
+                    item.Entry.Metadata.ClrType,
+                    item.State,
+                    keyValues,
+                    item.PreviousValues,
+                    expectedValues);
+            }).ToList();
+
+            _undoOperationStore.Record(batchId, userId, changes);
+        }
+
+        private static Dictionary<string, object?> CaptureUndoKeyValues(EntityEntry entry)
+        {
+            var key = entry.Metadata.FindPrimaryKey();
+            if (key == null)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot create an undo snapshot for keyless entity {entry.Metadata.ClrType.Name}.");
+            }
+
+            return key.Properties.ToDictionary(
+                property => property.Name,
+                property => CloneUndoValue(entry.Property(property.Name).CurrentValue));
+        }
+
+        private static Dictionary<string, object?> CaptureUndoValues(
+            EntityEntry entry,
+            IEnumerable<PropertyEntry> properties,
+            bool useOriginalValues)
+        {
+            return properties.ToDictionary(
+                property => property.Metadata.Name,
+                property => CloneUndoValue(
+                    useOriginalValues ? property.OriginalValue : property.CurrentValue));
+        }
+
+        private static object? CloneUndoValue(object? value) =>
+            value is byte[] bytes ? bytes.ToArray() : value;
+
+        private sealed record PendingUndo(
+            EntityEntry Entry,
+            EntityState State,
+            Dictionary<string, object?> KeyValues,
+            Dictionary<string, object?> PreviousValues);
 
         private void SetCreatedByRecords()
         {
@@ -369,6 +557,13 @@ namespace APINIMIRHEMAA.Data
 
             foreach (var entityType in entityTypes)
             {
+                if (entityType.ClrType == typeof(Materials) ||
+                    entityType.ClrType == typeof(Inventory) ||
+                    entityType.ClrType == typeof(Purchased_Material))
+                {
+                    continue;
+                }
+
                 if (entityType.ClrType == typeof(ClientEntity))
                 {
                     modelBuilder.Entity<ClientEntity>().HasQueryFilter(client =>
@@ -418,20 +613,10 @@ namespace APINIMIRHEMAA.Data
             public List<string> Changes = new();
         }
 
-        private List<PendingAudit> CollectAudits()
+        private List<PendingAudit> CollectAudits(string batchId)
         {
             ChangeTracker.DetectChanges();
             var list = new List<PendingAudit>();
-            var httpContext = _http.HttpContext;
-            var requestedBatchId = httpContext?.Request.Headers["X-Audit-Batch-Id"].FirstOrDefault();
-            string? batchId = Guid.TryParse(requestedBatchId, out var parsedBatchId)
-                ? parsedBatchId.ToString("N")
-                : httpContext?.Items[AuditBatchIdContextKey] as string;
-            batchId ??= Guid.NewGuid().ToString("N");
-            if (httpContext != null)
-            {
-                httpContext.Items[AuditBatchIdContextKey] = batchId;
-            }
 
             foreach (var entry in ChangeTracker.Entries()
                          .Where(e => e.Entity is not APINIMIRHEMAA.Models.AuditTrail &&

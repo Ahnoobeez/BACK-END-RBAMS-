@@ -26,6 +26,12 @@ namespace APINIMIRHEMAA.Models
         public List<JobOrderComment> Comments { get; set; } = new();
         [NotMapped]
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Client_Name { get; set; }
+        [NotMapped]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Contact_Person { get; set; }
+        [NotMapped]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public List<string>? AvailableDeliveryReceiptBranches { get; set; }
 
     }

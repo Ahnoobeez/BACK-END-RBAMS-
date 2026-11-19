@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using APINIMIRHEMAA.Models;
 
 namespace APINIMIRHEMAA.Data
@@ -156,6 +156,13 @@ namespace APINIMIRHEMAA.Data
 
             foreach (var entityType in entityTypes)
             {
+                if (entityType.ClrType == typeof(Materials) ||
+                    entityType.ClrType == typeof(Inventory) ||
+                    entityType.ClrType == typeof(Purchased_Material))
+                {
+                    continue;
+                }
+
                 if (entityType.ClrType == typeof(ClientEntity))
                 {
                     modelBuilder.Entity<ClientEntity>().HasQueryFilter(client =>
