@@ -571,8 +571,13 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
             await using var transaction = await _Localdb.Database.BeginTransactionAsync(cancellationToken);
             materialRequesitionSlip.Status = "Pending";
+            materialRequesitionSlip.Approved_By = null;
             _Localdb.Add(materialRequesitionSlip);
             await _Localdb.SaveChangesAsync(cancellationToken);
             await _notificationService.NotifyMaterialRequisitionSubmittedAsync(
@@ -589,10 +594,18 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
             var updateMaterialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.MR_ID == Id);
             if (updateMaterialRequesitionSlip == null)
             {
                 return NotFound();
+            }
+            if (string.Equals(updateMaterialRequesitionSlip.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict("An approved Material Requisition cannot be edited.");
             }
             updateMaterialRequesitionSlip.Control_Number = materialRequesitionSlip.Control_Number;
             updateMaterialRequesitionSlip.Date = materialRequesitionSlip.Date;
@@ -605,7 +618,6 @@ namespace APINIMIRHEMAA.Controllers
             updateMaterialRequesitionSlip.Unit_Cost = materialRequesitionSlip.Unit_Cost;
             updateMaterialRequesitionSlip.Total_Cost = materialRequesitionSlip.Total_Cost;
             updateMaterialRequesitionSlip.Noted_By = materialRequesitionSlip.Noted_By;
-            updateMaterialRequesitionSlip.Approved_By = materialRequesitionSlip.Approved_By;
             updateMaterialRequesitionSlip.Submmited_By = materialRequesitionSlip.Submmited_By;
             updateMaterialRequesitionSlip.Received_By = materialRequesitionSlip.Received_By;
 
@@ -654,6 +666,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
+            materialRequesitionSlip.Approved_By = null;
             _CloudDb.Add(materialRequesitionSlip);
             _CloudDb.SaveChanges();
             return Ok(materialRequesitionSlip);
@@ -666,6 +683,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
             var updateMaterialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.MR_ID == Id);
             if (updateMaterialRequesitionSlip == null)
             {
@@ -682,7 +703,6 @@ namespace APINIMIRHEMAA.Controllers
             updateMaterialRequesitionSlip.Unit_Cost = materialRequesitionSlip.Unit_Cost;
             updateMaterialRequesitionSlip.Total_Cost = materialRequesitionSlip.Total_Cost;
             updateMaterialRequesitionSlip.Noted_By = materialRequesitionSlip.Noted_By;
-            updateMaterialRequesitionSlip.Approved_By = materialRequesitionSlip.Approved_By;
             updateMaterialRequesitionSlip.Submmited_By = materialRequesitionSlip.Submmited_By;
             updateMaterialRequesitionSlip.Received_By = materialRequesitionSlip.Received_By;
 

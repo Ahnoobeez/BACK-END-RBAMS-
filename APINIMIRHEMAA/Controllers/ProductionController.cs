@@ -1,4 +1,4 @@
-﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.AuditTrail;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
 using APINIMIRHEMAA.DTO.JobOrders;
@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace APINIMIRHEMAA.Controllers
@@ -55,6 +57,280 @@ namespace APINIMIRHEMAA.Controllers
                 string.Equals(jobOrder.Status, "Completed", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(jobOrder.Status, "Complete", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(jobOrder.Status, "Complited", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsDeliveryReceiptApprover()
+        {
+            var role = User.FindFirstValue(ClaimTypes.Role) ?? "";
+            if (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(role, "Super Admin", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var department = User.FindFirstValue("Department") ?? "";
+            var normalizedDepartment = new string(
+                department.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+            return (string.Equals(role, "Department Manager", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(role, "Department Head", StringComparison.OrdinalIgnoreCase)) &&
+                normalizedDepartment == "production";
+        }
+
+        [HttpPost("ApproveInstallationReport/{id:int}")]
+        public async Task<ActionResult> ApproveInstallationReport(
+            int id,
+            CancellationToken cancellationToken)
+        {
+            if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var approverUserId))
+            {
+                return Unauthorized("Your session is invalid. Please sign in again.");
+            }
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            var report = await _Localdb.InstallationReport
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(record => record.InstallationReport_ID == id, cancellationToken);
+            if (report == null)
+            {
+                return NotFound("The Installation Report was not found.");
+            }
+
+            var preparedByUserId = await _Localdb.InstallationReportFiles
+                .IgnoreQueryFilters()
+                .Where(file =>
+                    file.InstallationReport_ID == id &&
+                    file.File_Role == "PreparedBy")
+                .OrderBy(file => file.InstallationReportFile_ID)
+                .Select(file => file.CreatedByUserId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (!preparedByUserId.HasValue)
+            {
+                return BadRequest("This Installation Report must have a preparer's signature before approval.");
+            }
+            if (preparedByUserId.Value == approverUserId)
+            {
+                return BadRequest("A different authorized user must approve this Installation Report.");
+            }
+
+            var existingApproval = await _Localdb.InstallationReportFiles
+                .IgnoreQueryFilters()
+                .AnyAsync(file =>
+                    file.InstallationReport_ID == id &&
+                    file.File_Role == "ApproverSigned",
+                    cancellationToken);
+            if (existingApproval)
+            {
+                return Conflict("This Installation Report has already been approved.");
+            }
+
+            var approverSignature = await _Localdb.UserSignatures
+                .AsNoTracking()
+                .SingleOrDefaultAsync(signature => signature.User_ID == approverUserId, cancellationToken);
+            if (approverSignature == null || approverSignature.SignatureData.Length == 0)
+            {
+                return BadRequest("Add a signature in Profile Settings before approving an Installation Report.");
+            }
+
+            report.ApprovedBy = User.FindFirstValue("EmployeeName") ??
+                User.FindFirstValue(ClaimTypes.Name);
+            _Localdb.InstallationReportFiles.Add(new InstallationReportFile
+            {
+                InstallationReport_ID = id,
+                File_Role = "ApproverSigned",
+                File_Name = "approved-by-signature.png",
+                File_Extension = ".png",
+                File_Data = _encryptionService.Encrypt(approverSignature.SignatureData)
+            });
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return Ok(new { message = "Installation Report approved and signed." });
+        }
+
+        [HttpGet("GetDeliveryReceiptApprovalQueue")]
+        public async Task<ActionResult<List<DeliveryReceipt>>> GetDeliveryReceiptApprovalQueue(
+            CancellationToken cancellationToken)
+        {
+            if (!IsDeliveryReceiptApprover())
+            {
+                return Forbid();
+            }
+            var receipts = await _Localdb.DeliveryReceipt
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .OrderByDescending(receipt => receipt.Delivery_ID)
+                .ToListAsync(cancellationToken);
+            var deliveryIds = receipts.Select(receipt => receipt.Delivery_ID).ToArray();
+            var files = deliveryIds.Length == 0
+                ? new List<DeliveryFiles>()
+                : await _Localdb.DeliveryFiles
+                    .IgnoreQueryFilters()
+                    .AsNoTracking()
+                    .Where(file => deliveryIds.Contains(file.Delivery_ID))
+                    .ToListAsync(cancellationToken);
+            foreach (var file in files)
+            {
+                file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
+            }
+            foreach (var receipt in receipts)
+            {
+                receipt.ApprovalStatus = WorkflowRules.GetDeliveryReceiptApprovalStatus(
+                    receipt.Status,
+                    files,
+                    receipt.Delivery_ID);
+                receipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                    WorkflowRules.HasReceivedByPhoto(files, receipt.Delivery_ID));
+            }
+            return Ok(receipts);
+        }
+
+        [HttpGet("GetDeliveryReceiptApprovalItems")]
+        public async Task<ActionResult<List<DeliveryReceiptItems>>> GetDeliveryReceiptApprovalItems(
+            CancellationToken cancellationToken)
+        {
+            if (!IsDeliveryReceiptApprover())
+            {
+                return Forbid();
+            }
+            var items = await _Localdb.DeliveryReceiptItems
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .OrderBy(item => item.Delivery_ID)
+                .ThenBy(item => item.DeliveryReceiptItems_ID)
+                .ToListAsync(cancellationToken);
+            return Ok(items);
+        }
+
+        [HttpGet("GetDeliveryReceiptApprovalSignatures")]
+        public async Task<ActionResult<List<DeliveryFiles>>> GetDeliveryReceiptApprovalSignatures(
+            CancellationToken cancellationToken)
+        {
+            if (!IsDeliveryReceiptApprover())
+            {
+                return Forbid();
+            }
+            var files = await _Localdb.DeliveryFiles
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(file => file.File_Role == "ApproverSigned" || file.File_Role == "PreparedBy")
+                .ToListAsync(cancellationToken);
+            var preparedByUsers = files
+                .Where(file => string.Equals(file.File_Role, "PreparedBy", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(file => file.Delivery_ID)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderBy(file => file.File_ID)
+                        .Select(file => file.CreatedByUserId)
+                        .FirstOrDefault());
+            var approvals = files
+                .Where(file =>
+                    string.Equals(file.File_Role, "ApproverSigned", StringComparison.OrdinalIgnoreCase) &&
+                    preparedByUsers.TryGetValue(file.Delivery_ID, out var preparedByUserId) &&
+                    preparedByUserId.HasValue &&
+                    file.CreatedByUserId.HasValue &&
+                    preparedByUserId.Value != file.CreatedByUserId.Value)
+                .ToList();
+            foreach (var file in approvals)
+            {
+                file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
+            }
+            return Ok(approvals);
+        }
+
+        [HttpPost("ApproveDeliveryReceipt/{id:int}")]
+        public Task<ActionResult> ApproveDeliveryReceipt(int id, CancellationToken cancellationToken) =>
+            SetDeliveryReceiptApprovalStatus(id, "Approved", cancellationToken);
+
+        [HttpPost("RejectDeliveryReceipt/{id:int}")]
+        public Task<ActionResult> RejectDeliveryReceipt(int id, CancellationToken cancellationToken) =>
+            SetDeliveryReceiptApprovalStatus(id, "Rejected", cancellationToken);
+
+        private async Task<ActionResult> SetDeliveryReceiptApprovalStatus(
+            int id,
+            string status,
+            CancellationToken cancellationToken)
+        {
+            if (!IsDeliveryReceiptApprover())
+            {
+                return Forbid();
+            }
+            if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var approverUserId))
+            {
+                return Unauthorized("Your session is invalid. Please sign in again.");
+            }
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            var receipt = await _Localdb.DeliveryReceipt
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(record => record.Delivery_ID == id, cancellationToken);
+            if (receipt == null)
+            {
+                return NotFound("The Delivery Receipt was not found.");
+            }
+
+            var files = await _Localdb.DeliveryFiles
+                .IgnoreQueryFilters()
+                .Where(file => file.Delivery_ID == id)
+                .ToListAsync(cancellationToken);
+            var currentStatus = WorkflowRules.GetDeliveryReceiptApprovalStatus(
+                receipt.Status,
+                files,
+                id);
+            if (currentStatus != "Request")
+            {
+                return Conflict($"This Delivery Receipt has already been {currentStatus.ToLowerInvariant()}.");
+            }
+
+            var preparedByUserId = files
+                .Where(file => string.Equals(file.File_Role, "PreparedBy", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(file => file.File_ID)
+                .Select(file => file.CreatedByUserId)
+                .FirstOrDefault();
+            if (!preparedByUserId.HasValue)
+            {
+                return BadRequest("This Delivery Receipt must have a preparer's signature before review.");
+            }
+            if (preparedByUserId.Value == approverUserId)
+            {
+                return BadRequest("A different authorized user must review this Delivery Receipt.");
+            }
+
+            if (status == "Approved")
+            {
+                var approverSignature = await _Localdb.UserSignatures
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(signature => signature.User_ID == approverUserId, cancellationToken);
+                if (approverSignature == null || approverSignature.SignatureData.Length == 0)
+                {
+                    return BadRequest("Add a signature in Profile Settings before approving a Delivery Receipt.");
+                }
+
+                var legacyApprovals = await _Localdb.DeliveryFiles
+                    .IgnoreQueryFilters()
+                    .Where(file => file.Delivery_ID == id && file.File_Role == "ApprovedBy")
+                    .ToListAsync(cancellationToken);
+                var priorApprovals = files
+                    .Where(file => string.Equals(file.File_Role, "ApproverSigned", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                _Localdb.DeliveryFiles.RemoveRange(legacyApprovals);
+                _Localdb.DeliveryFiles.RemoveRange(priorApprovals);
+                _Localdb.DeliveryFiles.Add(new DeliveryFiles
+                {
+                    Delivery_ID = id,
+                    File_Role = "ApproverSigned",
+                    File_Name = "approved-by-signature.png",
+                    File_Extension = ".png",
+                    File_Data = _encryptionService.Encrypt(approverSignature.SignatureData)
+                });
+            }
+
+            receipt.Status = status;
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return Ok(new { message = $"Delivery Receipt {status.ToLowerInvariant()}." });
         }
 
         // ----------------------------------- JOB ORDER -----------------------------------
@@ -992,8 +1268,13 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
             await using var transaction = await _Localdb.Database.BeginTransactionAsync(cancellationToken);
             materialRequesitionSlip.Status = "Pending";
+            materialRequesitionSlip.Approved_By = null;
             _Localdb.Add(materialRequesitionSlip);
             await _Localdb.SaveChangesAsync(cancellationToken);
             await _notificationService.NotifyMaterialRequisitionSubmittedAsync(
@@ -1010,10 +1291,18 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
             var updateMaterialRequesitionSlip = _Localdb.MaterialRequisition_Slip.FirstOrDefault(x => x.MR_ID == Id);
             if (updateMaterialRequesitionSlip == null)
             {
                 return NotFound();
+            }
+            if (string.Equals(updateMaterialRequesitionSlip.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict("An approved Material Requisition cannot be edited.");
             }
             updateMaterialRequesitionSlip.Control_Number = materialRequesitionSlip.Control_Number;
             updateMaterialRequesitionSlip.Date = materialRequesitionSlip.Date;
@@ -1026,7 +1315,6 @@ namespace APINIMIRHEMAA.Controllers
             updateMaterialRequesitionSlip.Unit_Cost = materialRequesitionSlip.Unit_Cost;
             updateMaterialRequesitionSlip.Total_Cost = materialRequesitionSlip.Total_Cost;
             updateMaterialRequesitionSlip.Noted_By = materialRequesitionSlip.Noted_By;
-            updateMaterialRequesitionSlip.Approved_By = materialRequesitionSlip.Approved_By;
             updateMaterialRequesitionSlip.Submmited_By = materialRequesitionSlip.Submmited_By;
             updateMaterialRequesitionSlip.Received_By = materialRequesitionSlip.Received_By;
 
@@ -1075,6 +1363,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
+            materialRequesitionSlip.Approved_By = null;
             _CloudDb.Add(materialRequesitionSlip);
             _CloudDb.SaveChanges();
             return Ok(materialRequesitionSlip);
@@ -1087,6 +1380,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
             var updateMaterialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.MR_ID == Id);
             if (updateMaterialRequesitionSlip == null)
             {
@@ -1103,7 +1400,6 @@ namespace APINIMIRHEMAA.Controllers
             updateMaterialRequesitionSlip.Unit_Cost = materialRequesitionSlip.Unit_Cost;
             updateMaterialRequesitionSlip.Total_Cost = materialRequesitionSlip.Total_Cost;
             updateMaterialRequesitionSlip.Noted_By = materialRequesitionSlip.Noted_By;
-            updateMaterialRequesitionSlip.Approved_By = materialRequesitionSlip.Approved_By;
             updateMaterialRequesitionSlip.Submmited_By = materialRequesitionSlip.Submmited_By;
             updateMaterialRequesitionSlip.Received_By = materialRequesitionSlip.Received_By;
 

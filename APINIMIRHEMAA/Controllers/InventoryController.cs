@@ -629,6 +629,7 @@ namespace APINIMIRHEMAA.Controllers
                 s.MR_ID = 0;
                 s.Total_Cost = s.Quantity * s.Unit_Cost;       // computed here
                 s.Status = "Pending";
+                s.Approved_By = null;
                 s.Submmited_By = submittedBySignature;
                 s.Date = today;                                // server date
                 _Localdb.MaterialRequisition_Slip.Add(s);
@@ -984,6 +985,7 @@ namespace APINIMIRHEMAA.Controllers
             inventory.Request = GetPendingDemand(inventory.Material_ID)
                 + quantity;
             materialRequesitionSlip.Status = "Pending";
+            materialRequesitionSlip.Approved_By = null;
             materialRequesitionSlip.Total_Cost =
                 materialRequesitionSlip.Quantity * materialRequesitionSlip.Unit_Cost;
             _Localdb.Add(materialRequesitionSlip);
@@ -1065,7 +1067,6 @@ namespace APINIMIRHEMAA.Controllers
             updateMaterialRequesitionSlip.Unit_Cost = materialRequesitionSlip.Unit_Cost;
             updateMaterialRequesitionSlip.Total_Cost = materialRequesitionSlip.Total_Cost;
             updateMaterialRequesitionSlip.Noted_By = materialRequesitionSlip.Noted_By;
-            updateMaterialRequesitionSlip.Approved_By = materialRequesitionSlip.Approved_By;
             updateMaterialRequesitionSlip.Submmited_By = materialRequesitionSlip.Submmited_By;
             updateMaterialRequesitionSlip.Received_By = materialRequesitionSlip.Received_By;
             updateMaterialRequesitionSlip.Status = "Pending";
@@ -1134,6 +1135,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
+            materialRequesitionSlip.Approved_By = null;
             _CloudDb.Add(materialRequesitionSlip);
             _CloudDb.SaveChanges();
             return Ok(materialRequesitionSlip);
@@ -1146,6 +1152,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(materialRequesitionSlip);
             }
+            var departmentError = InventoryRules.CheckSameDepartment(
+                materialRequesitionSlip.FromWho,
+                materialRequesitionSlip.ToWho);
+            if (departmentError != null) return BadRequest(departmentError);
             var updateMaterialRequesitionSlip = _CloudDb.MaterailsRequisition_Slip.FirstOrDefault(x => x.MR_ID == Id);
             if (updateMaterialRequesitionSlip == null)
             {
@@ -1162,7 +1172,6 @@ namespace APINIMIRHEMAA.Controllers
             updateMaterialRequesitionSlip.Unit_Cost = materialRequesitionSlip.Unit_Cost;
             updateMaterialRequesitionSlip.Total_Cost = materialRequesitionSlip.Total_Cost;
             updateMaterialRequesitionSlip.Noted_By = materialRequesitionSlip.Noted_By;
-            updateMaterialRequesitionSlip.Approved_By = materialRequesitionSlip.Approved_By;
             updateMaterialRequesitionSlip.Submmited_By = materialRequesitionSlip.Submmited_By;
             updateMaterialRequesitionSlip.Received_By = materialRequesitionSlip.Received_By;
 

@@ -181,8 +181,29 @@ namespace APINIMIRHEMAA.Controllers
             {
                 deliveryFile.File_Data = _encryptionService.TryDecrypt(deliveryFile.File_Data);
             }
+            var preparedByUsers = deliveryFiles
+                .Where(file => string.Equals(file.File_Role, "PreparedBy", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(file => file.Delivery_ID)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderBy(file => file.File_ID)
+                        .Select(file => file.CreatedByUserId)
+                        .FirstOrDefault());
+            deliveryFiles = deliveryFiles
+                .Where(file =>
+                    !string.Equals(file.File_Role, "ApprovedBy", StringComparison.OrdinalIgnoreCase) &&
+                    (!string.Equals(file.File_Role, "ApproverSigned", StringComparison.OrdinalIgnoreCase) ||
+                     (preparedByUsers.TryGetValue(file.Delivery_ID, out var preparedByUserId) &&
+                      preparedByUserId.HasValue &&
+                      file.CreatedByUserId.HasValue &&
+                      preparedByUserId.Value != file.CreatedByUserId.Value)))
+                .ToList();
             foreach (var deliveryReceipt in deliveryReceipts)
             {
+                deliveryReceipt.ApprovalStatus = WorkflowRules.GetDeliveryReceiptApprovalStatus(
+                    deliveryReceipt.Status,
+                    deliveryFiles,
+                    deliveryReceipt.Delivery_ID);
                 deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
                     WorkflowRules.HasReceivedByPhoto(deliveryFiles, deliveryReceipt.Delivery_ID));
             }
@@ -234,8 +255,14 @@ namespace APINIMIRHEMAA.Controllers
             }
             foreach (var report in installationReports)
             {
-                report.SignatureFiles = installationReportFiles
+                var reportSignatures = installationReportFiles
                     .Where(file => file.InstallationReport_ID == report.InstallationReport_ID)
+                    .ToList();
+                var approverSignature = reportSignatures.FirstOrDefault(file =>
+                    string.Equals(file.File_Role, "ApproverSigned", StringComparison.OrdinalIgnoreCase));
+                report.ApprovedBy = approverSignature?.CreatedBy;
+                report.SignatureFiles = reportSignatures
+                    .Where(file => !string.Equals(file.File_Role, "ApprovedBy", StringComparison.OrdinalIgnoreCase))
                     .ToList();
             }
             if (!string.IsNullOrWhiteSpace(client?.Business_Style) &&

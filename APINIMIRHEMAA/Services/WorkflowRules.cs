@@ -30,5 +30,38 @@ namespace APINIMIRHEMAA.Services
 
         public static string GetDeliveryReceiptStatus(bool hasReceivedByPhoto) =>
             hasReceivedByPhoto ? "Completed" : "In Progress";
+
+        public static string GetDeliveryReceiptApprovalStatus(
+            string? persistedStatus,
+            IEnumerable<DeliveryFiles> files,
+            int deliveryId)
+        {
+            var preparedByUserId = files
+                .Where(file => file.Delivery_ID == deliveryId &&
+                    string.Equals(file.File_Role, "PreparedBy", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(file => file.File_ID)
+                .Select(file => file.CreatedByUserId)
+                .FirstOrDefault();
+            if (string.Equals(persistedStatus, "Rejected", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Rejected";
+            }
+            if (string.Equals(persistedStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Approved";
+            }
+
+            var hasValidApproval = preparedByUserId.HasValue && files.Any(file =>
+                file.Delivery_ID == deliveryId &&
+                string.Equals(file.File_Role, "ApproverSigned", StringComparison.OrdinalIgnoreCase) &&
+                file.CreatedByUserId.HasValue &&
+                file.CreatedByUserId.Value != preparedByUserId.Value);
+
+            if (hasValidApproval)
+            {
+                return "Approved";
+            }
+            return "Request";
+        }
     }
 }

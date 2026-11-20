@@ -23,10 +23,23 @@ namespace APINIMIRHEMAA.Services
              IsWarehouse(from)) &&
             string.Equals(to?.Trim(), "Supplier", StringComparison.OrdinalIgnoreCase);
 
-        public static string? CheckDirection(string? from, string? to) =>
-            IsWarehouse(from) == IsWarehouse(to)
+        public static string? CheckSameDepartment(string? from, string? to) =>
+            !string.IsNullOrWhiteSpace(from) &&
+            !string.IsNullOrWhiteSpace(to) &&
+            string.Equals(from.Trim(), to.Trim(), StringComparison.OrdinalIgnoreCase)
+                ? "The from field cannot be the same with the To field"
+                : null;
+
+        public static string? CheckDirection(string? from, string? to)
+        {
+            var sameDepartmentError = CheckSameDepartment(from, to);
+            if (sameDepartmentError != null)
+                return sameDepartmentError;
+
+            return IsWarehouse(from) == IsWarehouse(to)
                 ? "Choose the Warehouse as either the FROM or the TO department (not both, not neither)."
                 : null;
+        }
 
         public static int BufferAllocation(int currentBuffer, int purchaseQuantity) =>
             Math.Min(purchaseQuantity, Math.Max(BufferTarget - currentBuffer, 0));

@@ -42,6 +42,14 @@ namespace APINIMIRHEMAA.Controllers
             return _Localdb.JobOrder.IgnoreQueryFilters();
         }
 
+        private static bool IsApprovedByRole(string? role) =>
+            string.Equals(role?.Trim(), "ApprovedBy", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role?.Trim(), "ApproverSigned", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsReviewedDeliveryReceiptStatus(string? status) =>
+            string.Equals(status, "Approved", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase);
+
         // ------------------------------- QUOTATION -------------------------------
 
         [HttpGet("GetLocalQuotationMaterials")]
@@ -1699,9 +1707,9 @@ namespace APINIMIRHEMAA.Controllers
                 return Conflict("An Installation Report already exists for the selected Job Order.");
             }
 
-            if (request.Signatures == null || request.Signatures.Count == 0 || request.Signatures.Count > 3)
+            if (request.Signatures == null || request.Signatures.Count == 0 || request.Signatures.Count > 2)
             {
-                return BadRequest("The prepared-by user signature is required, and no more than three sign-off images may be submitted.");
+                return BadRequest("The prepared-by user signature is required, and no more than two sign-off images may be submitted.");
             }
 
             var signatureRoles = new HashSet<string>(StringComparer.Ordinal);
@@ -1791,7 +1799,7 @@ namespace APINIMIRHEMAA.Controllers
                 InstallerRemarks = request.InstallerRemarks,
                 ClientSignature = request.ClientSignature,
                 PreparedBy = request.PreparedBy,
-                ApprovedBy = request.ApprovedBy
+                ApprovedBy = null
             };
 
             await using var transaction = await _Localdb.Database.BeginTransactionAsync();
@@ -1820,6 +1828,15 @@ namespace APINIMIRHEMAA.Controllers
             if (Id <= 0 || report == null)
             {
                 return BadRequest("A valid installation report ID and record are required.");
+            }
+
+            if (await _Localdb.InstallationReportFiles
+                .IgnoreQueryFilters()
+                .AnyAsync(file =>
+                    file.InstallationReport_ID == Id &&
+                    file.File_Role == "ApproverSigned"))
+            {
+                return Conflict("An approved Installation Report cannot be edited.");
             }
 
             var savedReport = await _Localdb.InstallationReport
@@ -1857,7 +1874,6 @@ namespace APINIMIRHEMAA.Controllers
             savedReport.InstallerRemarks = report.InstallerRemarks;
             savedReport.ClientSignature = report.ClientSignature;
             savedReport.PreparedBy = report.PreparedBy;
-            savedReport.ApprovedBy = report.ApprovedBy;
             await _Localdb.SaveChangesAsync();
             return Ok(savedReport);
         }
@@ -3268,6 +3284,10 @@ namespace APINIMIRHEMAA.Controllers
             }
             foreach (var receipt in receipts)
             {
+                receipt.ApprovalStatus = WorkflowRules.GetDeliveryReceiptApprovalStatus(
+                    receipt.Status,
+                    files,
+                    receipt.Delivery_ID);
                 receipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
                     WorkflowRules.HasReceivedByPhoto(files, receipt.Delivery_ID));
             }
@@ -3293,6 +3313,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
             }
+            deliveryReceipt.ApprovalStatus = WorkflowRules.GetDeliveryReceiptApprovalStatus(
+                deliveryReceipt.Status,
+                files,
+                id);
             deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
                 WorkflowRules.HasReceivedByPhoto(files, id));
             return Ok(deliveryReceipt);
@@ -3310,9 +3334,11 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid Job Order is required for the Delivery Receipt.");
             }
-            deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(false);
+            deliveryReceipt.Status = "Request";
             _Localdb.Add(deliveryReceipt);
             _Localdb.SaveChanges();
+            deliveryReceipt.ApprovalStatus = "Request";
+            deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(false);
             return Ok(deliveryReceipt);
         }
 
@@ -3328,10 +3354,25 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid Job Order is required for the Delivery Receipt.");
             }
+            using var transaction = _Localdb.Database.BeginTransaction(IsolationLevel.Serializable);
             var updateDeliveryReceipt = _Localdb.DeliveryReceipt.FirstOrDefault(x => x.Delivery_ID == Id);
             if (updateDeliveryReceipt == null)
             {
                 return NotFound();
+            }
+            var existingFiles = _Localdb.DeliveryFiles.AsNoTracking()
+                .Where(file => file.Delivery_ID == Id)
+                .ToList();
+            if (WorkflowRules.GetDeliveryReceiptApprovalStatus(
+                    updateDeliveryReceipt.Status,
+                    existingFiles,
+                    Id) != "Request")
+            {
+                return Conflict("An approved or rejected Delivery Receipt can no longer be edited.");
+            }
+            foreach (var file in existingFiles)
+            {
+                file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
             }
             updateDeliveryReceipt.JobOrderID = deliveryReceipt.JobOrderID;
             updateDeliveryReceipt.Title = deliveryReceipt.Title;
@@ -3340,19 +3381,12 @@ namespace APINIMIRHEMAA.Controllers
             updateDeliveryReceipt.Terms = deliveryReceipt.Terms;
             updateDeliveryReceipt.date = deliveryReceipt.date;
             updateDeliveryReceipt.time = deliveryReceipt.time;
-            updateDeliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
-                WorkflowRules.HasReceivedByPhoto(
-                    _Localdb.DeliveryFiles.AsNoTracking()
-                        .Where(file => file.Delivery_ID == Id)
-                        .ToList()
-                        .Select(file =>
-                        {
-                            file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
-                            return file;
-                        }),
-                    Id));
-
+            updateDeliveryReceipt.Status = "Request";
             _Localdb.SaveChanges();
+            updateDeliveryReceipt.ApprovalStatus = "Request";
+            updateDeliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                WorkflowRules.HasReceivedByPhoto(existingFiles, Id));
+            transaction.Commit();
             return Ok(updateDeliveryReceipt);
         }
 
@@ -3442,6 +3476,10 @@ namespace APINIMIRHEMAA.Controllers
             if (updateDeliveryReceipt == null)
             {
                 return NotFound();
+            }
+            if (IsReviewedDeliveryReceiptStatus(updateDeliveryReceipt.Status))
+            {
+                return Conflict("An approved or rejected Delivery Receipt can no longer be edited.");
             }
             updateDeliveryReceipt.JobOrderID = deliveryReceipt.JobOrderID;
             updateDeliveryReceipt.Title = deliveryReceipt.Title;
@@ -3558,6 +3596,33 @@ namespace APINIMIRHEMAA.Controllers
             return list;
         }
 
+        [HttpGet("GetLocalDeliveryReceiptApprovals")]
+        public ActionResult<List<DeliveryFiles>> GetLocalDeliveryReceiptApprovals()
+        {
+            var files = _Localdb.DeliveryFiles.AsNoTracking()
+                .Where(file => file.File_Role == "ApproverSigned")
+                .ToList();
+            var preparedByUsers = _Localdb.DeliveryFiles.AsNoTracking()
+                .Where(file => file.File_Role == "PreparedBy")
+                .GroupBy(file => file.Delivery_ID)
+                .ToDictionary(group => group.Key, group => group
+                    .OrderBy(file => file.File_ID)
+                    .Select(file => file.CreatedByUserId)
+                    .FirstOrDefault());
+            var approvals = files
+                .Where(file =>
+                    preparedByUsers.TryGetValue(file.Delivery_ID, out var preparedByUserId) &&
+                    preparedByUserId.HasValue &&
+                    file.CreatedByUserId.HasValue &&
+                    preparedByUserId.Value != file.CreatedByUserId.Value)
+                .ToList();
+            foreach (var file in approvals)
+            {
+                file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
+            }
+            return Ok(approvals);
+        }
+
         [HttpGet("GetLocalDeliveryFilesByID")]
         public ActionResult<DeliveryFiles> GetLocalDeliveryFilesByID(int id)
         {
@@ -3571,6 +3636,10 @@ namespace APINIMIRHEMAA.Controllers
         public ActionResult<DeliveryFiles> AddLocalDeliveryFiles(DeliveryFiles deliveryFiles)
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
+            if (IsApprovedByRole(deliveryFiles.File_Role))
+            {
+                return BadRequest("Approved by signatures can only be added through the Delivery Receipt approval action.");
+            }
 
             var isReceivedBy = WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role);
             var error = isReceivedBy
@@ -3600,7 +3669,6 @@ namespace APINIMIRHEMAA.Controllers
             _Localdb.DeliveryFiles.Add(deliveryFiles);
             if (isReceivedBy)
             {
-                deliveryReceipt!.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
                 jobOrder!.Date_Delivered = DateOnly.FromDateTime(DateTime.Now);
             }
             _Localdb.SaveChanges();
@@ -3613,6 +3681,10 @@ namespace APINIMIRHEMAA.Controllers
         public ActionResult<List<int>> AddLocalDeliveryFilesBatch([FromBody] List<DeliveryFiles> files)
         {
             if (files == null || files.Count == 0) return BadRequest("No files.");
+            if (files.Any(file => IsApprovedByRole(file.File_Role)))
+            {
+                return BadRequest("Approved by signatures can only be added through the Delivery Receipt approval action.");
+            }
 
             var receivedByDeliveryIds = files
                 .Where(file => string.Equals(file.File_Role?.Trim(), "ReceivedBy", StringComparison.OrdinalIgnoreCase))
@@ -3657,7 +3729,6 @@ namespace APINIMIRHEMAA.Controllers
             foreach (var deliveryReceipt in deliveryReceipts.Values)
             {
                 var jobOrder = deliveredJobOrders[deliveryReceipt.JobOrderID.GetValueOrDefault()];
-                deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
                 jobOrder.Date_Delivered = DateOnly.FromDateTime(DateTime.Now);
             }
             _Localdb.SaveChanges();
@@ -3676,6 +3747,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
+            if (IsApprovedByRole(updateDeliveryFiles.File_Role) || IsApprovedByRole(deliveryFiles.File_Role))
+            {
+                return BadRequest("Approved by signatures cannot be changed through the file update action.");
+            }
             var isReceivedBy = WorkflowRules.IsReceivedByRole(updateDeliveryFiles.File_Role);
             var error = isReceivedBy
                 ? UploadValidator.ValidateImage(deliveryFiles.File_Data)
@@ -3685,15 +3760,6 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(error);
             }
             updateDeliveryFiles.File_Data = _encryptionService.Encrypt(deliveryFiles.File_Data);
-            if (isReceivedBy)
-            {
-                var deliveryReceipt = _Localdb.DeliveryReceipt
-                    .FirstOrDefault(receipt => receipt.Delivery_ID == updateDeliveryFiles.Delivery_ID);
-                if (deliveryReceipt != null)
-                {
-                    deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
-                }
-            }
             _Localdb.SaveChanges();
             return Ok(updateDeliveryFiles);
         }
@@ -3706,20 +3772,9 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
-            var deliveryId = deliveryFiles.Delivery_ID;
-            var deliveryReceipt = _Localdb.DeliveryReceipt
-                .FirstOrDefault(receipt => receipt.Delivery_ID == deliveryId);
-            if (deliveryReceipt != null && WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role))
+            if (IsApprovedByRole(deliveryFiles.File_Role))
             {
-                var remainingFiles = _Localdb.DeliveryFiles.AsNoTracking()
-                    .Where(file => file.Delivery_ID == deliveryId && file.File_ID != id)
-                    .ToList();
-                foreach (var file in remainingFiles)
-                {
-                    file.File_Data = _encryptionService.TryDecrypt(file.File_Data);
-                }
-                deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
-                    WorkflowRules.HasReceivedByPhoto(remainingFiles, deliveryId));
+                return BadRequest("Approved by signatures cannot be deleted outside the approval workflow.");
             }
             _Localdb.Remove(deliveryFiles);
             _Localdb.SaveChanges();
@@ -3754,6 +3809,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            if (IsApprovedByRole(deliveryFiles.File_Role))
+            {
+                return BadRequest("Approved by signatures can only be added through the Delivery Receipt approval action.");
+            }
             DeliveryReceipt? deliveryReceipt = null;
             JobOrder? jobOrder = null;
             if (WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role))
@@ -3779,7 +3838,10 @@ namespace APINIMIRHEMAA.Controllers
             _CloudDb.Add(deliveryFiles);
             if (deliveryReceipt != null)
             {
-                deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
+                if (!IsReviewedDeliveryReceiptStatus(deliveryReceipt.Status))
+                {
+                    deliveryReceipt.Status = WorkflowRules.GetDeliveryReceiptStatus(true);
+                }
                 jobOrder!.Date_Delivered = DateOnly.FromDateTime(DateTime.Now);
             }
             _CloudDb.SaveChanges();
@@ -3797,6 +3859,10 @@ namespace APINIMIRHEMAA.Controllers
             if (updateDeliveryFiles == null)
             {
                 return NotFound();
+            }
+            if (IsApprovedByRole(updateDeliveryFiles.File_Role) || IsApprovedByRole(deliveryFiles.File_Role))
+            {
+                return BadRequest("Approved by signatures cannot be changed through the file update action.");
             }
             var previousDeliveryId = updateDeliveryFiles.Delivery_ID;
             var wasReceivedBy = WorkflowRules.IsReceivedByRole(updateDeliveryFiles.File_Role);
@@ -3831,8 +3897,11 @@ namespace APINIMIRHEMAA.Controllers
                 foreach (var receipt in _CloudDb.DeliveryReceipt
                              .Where(record => affectedDeliveryIds.Contains(record.Delivery_ID)))
                 {
-                    receipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
-                        WorkflowRules.HasReceivedByPhoto(remainingFiles, receipt.Delivery_ID));
+                    if (!IsReviewedDeliveryReceiptStatus(receipt.Status))
+                    {
+                        receipt.Status = WorkflowRules.GetDeliveryReceiptStatus(
+                            WorkflowRules.HasReceivedByPhoto(remainingFiles, receipt.Delivery_ID));
+                    }
                 }
             }
             _CloudDb.SaveChanges();
@@ -3847,10 +3916,16 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return NotFound();
             }
+            if (IsApprovedByRole(deliveryFiles.File_Role))
+            {
+                return BadRequest("Approved by signatures cannot be deleted outside the approval workflow.");
+            }
             var deliveryId = deliveryFiles.Delivery_ID;
             var deliveryReceipt = _CloudDb.DeliveryReceipt
                 .FirstOrDefault(receipt => receipt.Delivery_ID == deliveryId);
-            if (deliveryReceipt != null && WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role))
+            if (deliveryReceipt != null &&
+                WorkflowRules.IsReceivedByRole(deliveryFiles.File_Role) &&
+                !IsReviewedDeliveryReceiptStatus(deliveryReceipt.Status))
             {
                 var remainingFiles = _CloudDb.DeliveryFiles.AsNoTracking()
                     .Where(file => file.Delivery_ID == deliveryId && file.File_ID != id)

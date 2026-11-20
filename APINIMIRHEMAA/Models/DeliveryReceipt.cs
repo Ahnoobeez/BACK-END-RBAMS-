@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
 namespace APINIMIRHEMAA.Models
 {
@@ -19,6 +19,8 @@ namespace APINIMIRHEMAA.Models
         public DateOnly? date { get; set; }
         public TimeOnly? time { get; set; }
         public string? Status { get; set; }
+        [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+        public string? ApprovalStatus { get; set; }
 
     }
 }
