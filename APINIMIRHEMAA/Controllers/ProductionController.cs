@@ -1,5 +1,6 @@
 using APINIMIRHEMAA.Data;
 using APINIMIRHEMAA.DTO.AuditTrail;
+using APINIMIRHEMAA.DTO.InstallationReport;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
 using APINIMIRHEMAA.DTO.JobOrders;
 using APINIMIRHEMAA.Models;
@@ -74,6 +75,222 @@ namespace APINIMIRHEMAA.Controllers
             return (string.Equals(role, "Department Manager", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(role, "Department Head", StringComparison.OrdinalIgnoreCase)) &&
                 normalizedDepartment == "production";
+        }
+
+        [HttpGet("GetInstallationReportJobOrders")]
+        public async Task<ActionResult<IReadOnlyList<InstallationReportJobOrderOption>>> GetInstallationReportJobOrders(
+            CancellationToken cancellationToken)
+        {
+            var jobOrders = await GetProductionVisibleJobOrders()
+                .AsNoTracking()
+                .Where(jobOrder =>
+                    jobOrder.Production_Completed ||
+                    jobOrder.Status == "Completed" ||
+                    jobOrder.Status == "Complete" ||
+                    jobOrder.Status == "complited")
+                .OrderByDescending(jobOrder => jobOrder.JobOrder_ID)
+                .ToListAsync(cancellationToken);
+            var existingReportJobOrderIds = await _Localdb.InstallationReport
+                .AsNoTracking()
+                .Select(report => report.JobOrder_ID)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            jobOrders = jobOrders
+                .Where(jobOrder => !existingReportJobOrderIds.Contains(jobOrder.JobOrder_ID))
+                .ToList();
+
+            if (jobOrders.Count == 0)
+            {
+                return Ok(Array.Empty<InstallationReportJobOrderOption>());
+            }
+
+            var conformeIds = jobOrders.Select(jobOrder => jobOrder.Conforme_FileID).Distinct().ToArray();
+            var conformes = await _Localdb.Conforme
+                .AsNoTracking()
+                .Where(conforme => conformeIds.Contains(conforme.FileID))
+                .Select(conforme => new { conforme.FileID, conforme.Quotation_ID })
+                .ToDictionaryAsync(conforme => conforme.FileID, cancellationToken);
+
+            var quotationIds = conformes.Values.Select(conforme => conforme.Quotation_ID).Distinct().ToArray();
+            var quotations = await _Localdb.Quotation
+                .AsNoTracking()
+                .Where(quotation => quotationIds.Contains(quotation.Quotation_ID))
+                .Select(quotation => new { quotation.Quotation_ID, quotation.Client_ID, quotation.Title })
+                .ToDictionaryAsync(quotation => quotation.Quotation_ID, cancellationToken);
+
+            var clientIds = quotations.Values.Select(quotation => quotation.Client_ID).Distinct().ToArray();
+            var clients = await _Localdb.Clients
+                .AsNoTracking()
+                .Where(client => clientIds.Contains(client.Client_ID))
+                .Select(client => new { client.Client_ID, client.Client_Name, client.Company_Address })
+                .ToDictionaryAsync(client => client.Client_ID, cancellationToken);
+
+            var options = jobOrders.Select(jobOrder =>
+            {
+                string? clientName = null;
+                string? location = null;
+                string? quotationTitle = null;
+
+                if (conformes.TryGetValue(jobOrder.Conforme_FileID, out var conforme)
+                    && quotations.TryGetValue(conforme.Quotation_ID, out var quotation))
+                {
+                    quotationTitle = quotation.Title;
+                    if (clients.TryGetValue(quotation.Client_ID, out var client))
+                    {
+                        clientName = client.Client_Name;
+                        location = client.Company_Address;
+                    }
+                }
+
+                return new InstallationReportJobOrderOption
+                {
+                    JobOrderId = jobOrder.JobOrder_ID,
+                    ClientName = clientName,
+                    ProjectName = string.IsNullOrWhiteSpace(jobOrder.Title) ? quotationTitle : jobOrder.Title,
+                    Location = location,
+                    InstallationDate = jobOrder.Installation_Date
+                };
+            }).ToArray();
+
+            return Ok(options);
+        }
+
+        [HttpPost("AddLocalInstallationReport")]
+        [RequestSizeLimit(10_000_000)]
+        public async Task<ActionResult> AddLocalInstallationReport(
+            [FromBody] CreateInstallationReportRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!ModelState.IsValid)
+            {
+                return ValidationProblem(ModelState);
+            }
+
+            var jobOrderExists = await _Localdb.JobOrder
+                .AsNoTracking()
+                .AnyAsync(jobOrder => jobOrder.JobOrder_ID == request.JobOrderId, cancellationToken);
+            if (!jobOrderExists)
+            {
+                return NotFound("The selected Job Order was not found.");
+            }
+            if (await _Localdb.InstallationReport
+                .AsNoTracking()
+                .AnyAsync(report => report.JobOrder_ID == request.JobOrderId, cancellationToken))
+            {
+                return Conflict("An Installation Report already exists for the selected Job Order.");
+            }
+
+            if (request.Signatures == null || request.Signatures.Count == 0 || request.Signatures.Count > 2)
+            {
+                return BadRequest("The prepared-by user signature is required, and no more than two sign-off images may be submitted.");
+            }
+
+            var signatureRoles = new HashSet<string>(StringComparer.Ordinal);
+            var signatureFiles = new List<InstallationReportFile>();
+            foreach (var signature in request.Signatures)
+            {
+                if (signature == null)
+                {
+                    return BadRequest("An Installation Report signature entry is missing.");
+                }
+                if (!signatureRoles.Add(signature.FileRole))
+                {
+                    return BadRequest($"Only one {signature.FileRole} signature image may be submitted.");
+                }
+
+                var extension = signature.FileExtension.Trim().ToLowerInvariant();
+                if (extension is not ".png" and not ".jpg" and not ".jpeg")
+                {
+                    return BadRequest("Installation Report sign-off files must be JPG or PNG images.");
+                }
+
+                var validationError = UploadValidator.ValidateImage(signature.FileData);
+                if (validationError != null)
+                {
+                    return BadRequest(validationError);
+                }
+
+                var fileData = signature.FileData;
+                if (fileData.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var separator = fileData.IndexOf(',');
+                    fileData = separator < 0 ? string.Empty : fileData[(separator + 1)..];
+                }
+
+                byte[] imageBytes;
+                try
+                {
+                    imageBytes = Convert.FromBase64String(fileData);
+                }
+                catch (FormatException)
+                {
+                    return BadRequest("An Installation Report signature image contains invalid file data.");
+                }
+
+                var fileName = Path.GetFileName(signature.FileName.Trim());
+                if (string.IsNullOrWhiteSpace(fileName))
+                {
+                    return BadRequest("Every Installation Report signature image must have a file name.");
+                }
+
+                signatureFiles.Add(new InstallationReportFile
+                {
+                    File_Role = signature.FileRole,
+                    File_Name = fileName,
+                    File_Extension = extension,
+                    File_Data = _encryptionService.Encrypt(imageBytes)
+                });
+            }
+
+            if (!signatureRoles.Contains("PreparedBy"))
+            {
+                return BadRequest("The prepared-by user signature is required.");
+            }
+
+            var report = new InstallationReport
+            {
+                JobOrder_ID = request.JobOrderId,
+                ClientName = request.ClientName,
+                ProjectName = request.ProjectName,
+                Location = request.Location,
+                ReportDate = request.ReportDate,
+                TimeStarted = request.TimeStarted,
+                TimeEnded = request.TimeEnded,
+                Installers = request.Installers,
+                OnTime = request.OnTime,
+                UniformAndId = request.UniformAndId,
+                GraphicsProperlyInstalled = request.GraphicsProperlyInstalled,
+                ProblemsOccurred = request.ProblemsOccurred,
+                ProblemsNote = request.ProblemsNote,
+                AreaClean = request.AreaClean,
+                InstallersMannered = request.InstallersMannered,
+                ClientRemarks = request.ClientRemarks,
+                Obstruction = request.Obstruction,
+                ObstructionDetails = request.ObstructionDetails,
+                GraphicsDamaged = request.GraphicsDamaged,
+                DamageDetails = request.DamageDetails,
+                InstallerRemarks = request.InstallerRemarks,
+                ClientSignature = request.ClientSignature,
+                PreparedBy = request.PreparedBy,
+                ApprovedBy = null
+            };
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(cancellationToken);
+            _Localdb.InstallationReport.Add(report);
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            foreach (var signatureFile in signatureFiles)
+            {
+                signatureFile.InstallationReport_ID = report.InstallationReport_ID;
+            }
+            await _Localdb.InstallationReportFiles.AddRangeAsync(signatureFiles, cancellationToken);
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return Ok(new
+            {
+                installationReportId = report.InstallationReport_ID,
+                jobOrderId = report.JobOrder_ID
+            });
         }
 
         [HttpPost("ApproveInstallationReport/{id:int}")]

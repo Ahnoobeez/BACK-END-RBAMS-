@@ -42,13 +42,15 @@ namespace APINIMIRHEMAA.Controllers
 
 
         [HttpPost("AddLocalUsers")]
-        public ActionResult AddLocalUsers([FromBody] CreateUserDto dto)
+        public async Task<ActionResult> AddLocalUsers(
+            [FromBody] CreateUserDto dto,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(dto.Username))
                 return BadRequest("A username is required.");
             if (!PasswordPolicy.IsValid(dto.Password))
                 return BadRequest(PasswordPolicy.RequirementMessage);
-            if (_Localdb.Users.Any(u => u.Username == dto.Username))
+            if (await _Localdb.Users.AnyAsync(u => u.Username == dto.Username, cancellationToken))
                 return Conflict("That username already exists.");
 
             var user = new Users
@@ -61,8 +63,31 @@ namespace APINIMIRHEMAA.Controllers
                 Department_ID = dto.Department_ID,
                 IsActive = true
             };
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(cancellationToken);
             _Localdb.Users.Add(user);
-            _Localdb.SaveChanges();
+            await _Localdb.SaveChangesAsync(cancellationToken);
+
+            if (dto.Employee_ID > 0)
+            {
+                var employeePhoto = await _Localdb.EmployeeProfilePhotos
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        photo => photo.Employee_ID == dto.Employee_ID,
+                        cancellationToken);
+                if (employeePhoto != null)
+                {
+                    _Localdb.UserProfilePhotos.Add(new UserProfilePhoto
+                    {
+                        User_ID = user.User_ID,
+                        PhotoData = employeePhoto.PhotoData,
+                        ContentType = employeePhoto.ContentType,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                    await _Localdb.SaveChangesAsync(cancellationToken);
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
             return Ok(new { user.User_ID });
         }
 

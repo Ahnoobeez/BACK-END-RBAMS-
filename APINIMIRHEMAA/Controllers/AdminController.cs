@@ -1027,6 +1027,21 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(new { message = "First name, last name, and status are required." });
             }
 
+            const string employeeNamePattern = @"^[\p{L}\p{M} ]+$";
+            if (!Regex.IsMatch(employee.FirstName.Trim(), employeeNamePattern) ||
+                !Regex.IsMatch(employee.LastName.Trim(), employeeNamePattern) ||
+                (!string.IsNullOrWhiteSpace(employee.MiddleName) &&
+                 !Regex.IsMatch(employee.MiddleName.Trim(), employeeNamePattern)))
+            {
+                return BadRequest(new { message = "Employee names may contain letters and spaces only." });
+            }
+
+            if (!string.IsNullOrWhiteSpace(employee.ContactNumber) &&
+                !Regex.IsMatch(employee.ContactNumber.Trim(), @"^[0-9]{11}$"))
+            {
+                return BadRequest(new { message = "Enter exactly 11 digits for the phone number." });
+            }
+
             if (!employee.Department_ID.HasValue ||
                 !await _Localdb.Departments.AnyAsync(
                     department => department.Department_ID == employee.Department_ID.Value,
@@ -1077,11 +1092,200 @@ namespace APINIMIRHEMAA.Controllers
             employee.Pagibig_Number = string.IsNullOrWhiteSpace(employee.Pagibig_Number)
                 ? null
                 : employee.Pagibig_Number.Trim();
+            employee.Date_Resigned = null;
 
             _Localdb.Employee.Add(employee);
             await _Localdb.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return Ok(employee);
+        }
+
+        [HttpPut("UpdateLocalEmployee")]
+        public async Task<ActionResult<Employee>> UpdateLocalEmployee(
+            [FromBody] Employee? employee,
+            CancellationToken cancellationToken)
+        {
+            if (employee == null || employee.Employee_Id <= 0)
+            {
+                return BadRequest(new { message = "A valid employee record is required." });
+            }
+
+            var existingEmployee = await _Localdb.Employee.FirstOrDefaultAsync(
+                record => record.Employee_Id == employee.Employee_Id,
+                cancellationToken);
+            if (existingEmployee == null)
+            {
+                return NotFound(new { message = "The employee could not be found." });
+            }
+
+            if (string.IsNullOrWhiteSpace(employee.FirstName) ||
+                string.IsNullOrWhiteSpace(employee.LastName) ||
+                string.IsNullOrWhiteSpace(employee.status))
+            {
+                return BadRequest(new { message = "First name, last name, and status are required." });
+            }
+
+            const string employeeNamePattern = @"^[\p{L}\p{M} ]+$";
+            if (!Regex.IsMatch(employee.FirstName.Trim(), employeeNamePattern) ||
+                !Regex.IsMatch(employee.LastName.Trim(), employeeNamePattern) ||
+                (!string.IsNullOrWhiteSpace(employee.MiddleName) &&
+                 !Regex.IsMatch(employee.MiddleName.Trim(), employeeNamePattern)))
+            {
+                return BadRequest(new { message = "Employee names may contain letters and spaces only." });
+            }
+
+            if (!string.IsNullOrWhiteSpace(employee.ContactNumber) &&
+                !Regex.IsMatch(employee.ContactNumber.Trim(), @"^[0-9]{11}$"))
+            {
+                return BadRequest(new { message = "Enter exactly 11 digits for the phone number." });
+            }
+
+            if (!string.IsNullOrWhiteSpace(employee.SSS_Number) &&
+                !Regex.IsMatch(employee.SSS_Number.Trim(), @"^[0-9]{2}-[0-9]{7}-[0-9]$"))
+            {
+                return BadRequest(new { message = "Enter the SSS number as XX-XXXXXXX-X." });
+            }
+
+            if (!string.IsNullOrWhiteSpace(employee.Philhealth_Number) &&
+                !Regex.IsMatch(employee.Philhealth_Number.Trim(), @"^[0-9]{2}-[0-9]{9}-[0-9]$"))
+            {
+                return BadRequest(new { message = "Enter the PhilHealth number as XX-XXXXXXXXX-X." });
+            }
+
+            if (!string.IsNullOrWhiteSpace(employee.Pagibig_Number) &&
+                !Regex.IsMatch(employee.Pagibig_Number.Trim(), @"^[0-9]{4}-[0-9]{4}-[0-9]{4}$"))
+            {
+                return BadRequest(new { message = "Enter the Pag-IBIG number as XXXX-XXXX-XXXX." });
+            }
+
+            if (!employee.Department_ID.HasValue ||
+                !await _Localdb.Departments.AnyAsync(
+                    department => department.Department_ID == employee.Department_ID.Value,
+                    cancellationToken))
+            {
+                return BadRequest(new { message = "Select a valid department." });
+            }
+
+            if (!employee.Role_ID.HasValue ||
+                !await _Localdb.Roles.AnyAsync(
+                    role => role.Role_ID == employee.Role_ID.Value,
+                    cancellationToken))
+            {
+                return BadRequest(new { message = "Select a valid role." });
+            }
+
+            existingEmployee.LastName = employee.LastName.Trim();
+            existingEmployee.FirstName = employee.FirstName.Trim();
+            existingEmployee.MiddleName = string.IsNullOrWhiteSpace(employee.MiddleName)
+                ? null
+                : employee.MiddleName.Trim();
+            existingEmployee.status = employee.status.Trim();
+            existingEmployee.Department_ID = employee.Department_ID;
+            existingEmployee.Role_ID = employee.Role_ID;
+            existingEmployee.Birthday = employee.Birthday;
+            existingEmployee.ContactNumber = string.IsNullOrWhiteSpace(employee.ContactNumber)
+                ? null
+                : employee.ContactNumber.Trim();
+            existingEmployee.SSS_Number = string.IsNullOrWhiteSpace(employee.SSS_Number)
+                ? null
+                : employee.SSS_Number.Trim();
+            existingEmployee.Philhealth_Number = string.IsNullOrWhiteSpace(employee.Philhealth_Number)
+                ? null
+                : employee.Philhealth_Number.Trim();
+            existingEmployee.Pagibig_Number = string.IsNullOrWhiteSpace(employee.Pagibig_Number)
+                ? null
+                : employee.Pagibig_Number.Trim();
+            existingEmployee.Date_Started = employee.Date_Started;
+            existingEmployee.Date_Resigned = employee.Date_Resigned;
+
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            return Ok(existingEmployee);
+        }
+
+        [HttpGet("GetLocalEmployeePhoto")]
+        public async Task<IActionResult> GetLocalEmployeePhoto(
+            [FromQuery] int employeeId,
+            CancellationToken cancellationToken)
+        {
+            if (employeeId <= 0)
+            {
+                return BadRequest(new { message = "A valid employee ID is required." });
+            }
+
+            var photo = await _Localdb.EmployeeProfilePhotos
+                .AsNoTracking()
+                .FirstOrDefaultAsync(record => record.Employee_ID == employeeId, cancellationToken);
+            return photo == null
+                ? NotFound()
+                : File(photo.PhotoData, photo.ContentType);
+        }
+
+        [HttpPut("SaveLocalEmployeePhoto")]
+        [RequestSizeLimit(2 * 1024 * 1024 + 128 * 1024)]
+        public async Task<IActionResult> SaveLocalEmployeePhoto(
+            [FromQuery] int employeeId,
+            IFormFile? photo,
+            CancellationToken cancellationToken)
+        {
+            if (employeeId <= 0)
+            {
+                return BadRequest(new { message = "A valid employee ID is required." });
+            }
+
+            if (photo == null || photo.Length == 0)
+            {
+                return BadRequest(new { message = "Choose a JPG or PNG employee photo." });
+            }
+
+            if (photo.Length > 2 * 1024 * 1024)
+            {
+                return BadRequest(new { message = "Employee photos must be 2 MB or smaller." });
+            }
+
+            if (!await _Localdb.Employee.AnyAsync(
+                    employee => employee.Employee_Id == employeeId,
+                    cancellationToken))
+            {
+                return NotFound(new { message = "The employee could not be found." });
+            }
+
+            await using var memoryStream = new MemoryStream();
+            await photo.CopyToAsync(memoryStream, cancellationToken);
+            var photoBytes = memoryStream.ToArray();
+            var validationError = UploadValidator.ValidateImage(photoBytes);
+            if (validationError != null)
+            {
+                return BadRequest(new { message = validationError });
+            }
+
+            var contentType = photo.ContentType.ToLowerInvariant();
+            if (contentType is not ("image/jpeg" or "image/png"))
+            {
+                return BadRequest(new { message = "Employee photos must be JPG or PNG images." });
+            }
+
+            var record = await _Localdb.EmployeeProfilePhotos
+                .FirstOrDefaultAsync(item => item.Employee_ID == employeeId, cancellationToken);
+            if (record == null)
+            {
+                record = new EmployeeProfilePhoto
+                {
+                    Employee_ID = employeeId,
+                    PhotoData = photoBytes,
+                    ContentType = contentType,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _Localdb.EmployeeProfilePhotos.Add(record);
+            }
+            else
+            {
+                record.PhotoData = photoBytes;
+                record.ContentType = contentType;
+                record.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            return Ok(new { employeeId, message = "Employee photo saved." });
         }
 
         [HttpGet("GetLocalRoles")]

@@ -52,6 +52,7 @@ namespace APINIMIRHEMAA.Data
         public DbSet<Users> Users { get; set; }
         public DbSet<UserSignature> UserSignatures { get; set; }
         public DbSet<UserProfilePhoto> UserProfilePhotos { get; set; }
+        public DbSet<EmployeeProfilePhoto> EmployeeProfilePhotos { get; set; }
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<UserSecurityAnswer> UserSecurityAnswers { get; set; }
         public DbSet<PasswordRecoveryChallenge> PasswordRecoveryChallenges { get; set; }
@@ -91,6 +92,21 @@ namespace APINIMIRHEMAA.Data
                     .HasDefaultValueSql("NEXT VALUE FOR dbo.ServiceInvoiceIdSequence");
                 entity.Property(invoice => invoice.Quantity)
                     .ValueGeneratedOnAdd();
+            });
+            modelBuilder.Entity<EmployeeProfilePhoto>(entity =>
+            {
+                entity.ToTable("EmployeeProfilePhoto");
+                entity.HasKey(photo => photo.Employee_ID);
+                entity.Property(photo => photo.PhotoData)
+                    .HasColumnType("varbinary(max)")
+                    .IsRequired();
+                entity.Property(photo => photo.ContentType)
+                    .HasMaxLength(32)
+                    .IsRequired();
+                entity.HasOne<Employee>()
+                    .WithMany()
+                    .HasForeignKey(photo => photo.Employee_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
             modelBuilder.Entity<ServiceInvoiceFile>(entity =>
             {

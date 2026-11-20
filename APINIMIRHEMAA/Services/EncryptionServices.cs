@@ -43,7 +43,7 @@ namespace APINIMIRHEMAA.Services
             if (value == null || value.Length == 0)
                 return Array.Empty<byte>();
 
-            return _protector.Unprotect(value);
+            x`return _protector.Unprotect(value);
         }
         public static bool IsProtected(byte[]? v) => v != null && v.Length > 4 && v[0] == 0x09 && v[1] == 0xF0 && v[2] == 0xC9 && v[3] == 0xF0;
 
