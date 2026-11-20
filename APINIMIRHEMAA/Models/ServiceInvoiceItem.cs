@@ -13,6 +13,8 @@ namespace APINIMIRHEMAA.Models
         public int ServiceInvoiceItem_ID { get; set; }
         public int ServiceInvoice_ID { get; set; }
         public int Quantity { get; set; }
+        public string? Store { get; set; }
+        public string? Requirement { get; set; }
         [Required]
         [MaxLength(50)]
         public string Unit { get; set; } = string.Empty;

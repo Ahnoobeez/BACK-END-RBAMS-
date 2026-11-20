@@ -13,6 +13,11 @@ namespace APINIMIRHEMAA.Models
         [Key]
         public int ServiceInvoice_ID { get; set; }
         public int? JobOrder_ID { get; set; }
+        public string? Branch { get; set; }
+        public string? Title { get; set; }
+        public string? ClientName { get; set; }
+        public string? Address { get; set; }
+        public string? Terms { get; set; }
         public DateOnly Invoice_Date { get; set; }
         public int? Quantity { get; set; }
         public string? Unit { get; set; }

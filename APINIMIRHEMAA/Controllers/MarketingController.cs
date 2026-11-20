@@ -2822,6 +2822,21 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Select a valid saved Job Order.");
             }
+            if (string.IsNullOrWhiteSpace(submission.Branch) ||
+                string.IsNullOrWhiteSpace(submission.Title) ||
+                string.IsNullOrWhiteSpace(submission.ClientName) ||
+                string.IsNullOrWhiteSpace(submission.Address) ||
+                string.IsNullOrWhiteSpace(submission.Terms))
+            {
+                return BadRequest("Branch, project title, client, address, and terms are required.");
+            }
+            var branch = submission.Branch.Trim();
+            if (!await _Localdb.JobOrderItems.AnyAsync(item =>
+                    item.JobOrder_ID == submission.JobOrder_ID &&
+                    item.Store == branch))
+            {
+                return BadRequest("The selected Branch does not belong to this Job Order.");
+            }
             if (await _Localdb.ServiceInvoice
                 .AsNoTracking()
                 .AnyAsync(invoice => invoice.JobOrder_ID == submission.JobOrder_ID))
@@ -2837,6 +2852,9 @@ namespace APINIMIRHEMAA.Controllers
                 var item = submission.Items[index];
                 if (item.Quantity <= 0 || string.IsNullOrWhiteSpace(item.Unit) ||
                     item.Unit.Length > 50 ||
+                    string.IsNullOrWhiteSpace(item.Requirement) ||
+                    string.IsNullOrWhiteSpace(item.Store) ||
+                    !string.Equals(item.Store.Trim(), branch, StringComparison.OrdinalIgnoreCase) ||
                     string.IsNullOrWhiteSpace(item.Description) ||
                     item.Unit_Price < 0 || item.Amount < 0)
                 {
@@ -2852,6 +2870,11 @@ namespace APINIMIRHEMAA.Controllers
             var invoice = new ServiceInvoice
             {
                 JobOrder_ID = submission.JobOrder_ID,
+                Branch = branch,
+                Title = submission.Title.Trim(),
+                ClientName = submission.ClientName.Trim(),
+                Address = submission.Address.Trim(),
+                Terms = submission.Terms.Trim(),
                 Invoice_Date = submission.Invoice_Date == default
                     ? DateOnly.FromDateTime(DateTime.Today)
                     : submission.Invoice_Date,
@@ -2865,6 +2888,8 @@ namespace APINIMIRHEMAA.Controllers
                 ServiceInvoice_ID = invoice.ServiceInvoice_ID,
                 Quantity = item.Quantity,
                 Unit = item.Unit.Trim(),
+                Store = item.Store.Trim(),
+                Requirement = item.Requirement.Trim(),
                 Description = item.Description.Trim(),
                 Unit_Price = decimal.Round(item.Unit_Price, 2),
                 Amount = decimal.Round(item.Amount, 2)
@@ -2907,6 +2932,14 @@ namespace APINIMIRHEMAA.Controllers
 
             existingItem.Quantity = serviceInvoiceItem.Quantity;
             existingItem.Unit = serviceInvoiceItem.Unit.Trim();
+            if (serviceInvoiceItem.Store is not null)
+            {
+                existingItem.Store = serviceInvoiceItem.Store.Trim();
+            }
+            if (serviceInvoiceItem.Requirement is not null)
+            {
+                existingItem.Requirement = serviceInvoiceItem.Requirement.Trim();
+            }
             existingItem.Description = serviceInvoiceItem.Description.Trim();
             existingItem.Unit_Price = decimal.Round(serviceInvoiceItem.Unit_Price, 2);
             existingItem.Amount = decimal.Round(serviceInvoiceItem.Amount, 2);
@@ -2935,6 +2968,26 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound("The selected Job Order was not found.");
             }
             updateServiceInvoice.JobOrder_ID = serviceInvoice.JobOrder_ID;
+            if (serviceInvoice.Branch is not null)
+            {
+                updateServiceInvoice.Branch = serviceInvoice.Branch.Trim();
+            }
+            if (serviceInvoice.Title is not null)
+            {
+                updateServiceInvoice.Title = serviceInvoice.Title.Trim();
+            }
+            if (serviceInvoice.ClientName is not null)
+            {
+                updateServiceInvoice.ClientName = serviceInvoice.ClientName.Trim();
+            }
+            if (serviceInvoice.Address is not null)
+            {
+                updateServiceInvoice.Address = serviceInvoice.Address.Trim();
+            }
+            if (serviceInvoice.Terms is not null)
+            {
+                updateServiceInvoice.Terms = serviceInvoice.Terms.Trim();
+            }
             if (serviceInvoice.Invoice_Date != default)
             {
                 updateServiceInvoice.Invoice_Date = serviceInvoice.Invoice_Date;
