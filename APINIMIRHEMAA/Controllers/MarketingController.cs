@@ -3283,7 +3283,6 @@ namespace APINIMIRHEMAA.Controllers
                 from assignment in _Localdb.Installation_Schedule_Employee.AsNoTracking()
                 join employee in _Localdb.Employee.AsNoTracking()
                     on assignment.Employee_Id equals employee.Employee_Id
-                orderby assignment.Installation_ID, employee.LastName, employee.FirstName
                 select new InstallationScheduleEmployeeAssignmentDto
                 {
                     Installation_ID = assignment.Installation_ID,
@@ -3291,6 +3290,10 @@ namespace APINIMIRHEMAA.Controllers
                     FirstName = employee.FirstName,
                     LastName = employee.LastName
                 })
+                .ToList()
+                .OrderBy(assignment => assignment.Installation_ID)
+                .ThenBy(assignment => assignment.LastName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(assignment => assignment.FirstName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             return Ok(assignments);

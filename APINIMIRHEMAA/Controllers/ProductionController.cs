@@ -1,4 +1,5 @@
 using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.DTO;
 using APINIMIRHEMAA.DTO.AuditTrail;
 using APINIMIRHEMAA.DTO.InstallationReport;
 using APINIMIRHEMAA.DTO.InstallationSchedule;
@@ -41,7 +42,10 @@ namespace APINIMIRHEMAA.Controllers
         {
             return _Localdb.Departments
                 .AsNoTracking()
-                .Where(department => department.Department_Name.Trim().ToLower() == "production")
+                .Where(department =>
+                    department.Department_Name.ToLower().Contains("production") ||
+                    department.Department_Name.ToLower().Contains("joborder") ||
+                    department.Department_Name.ToLower().Contains("job order"))
                 .Select(department => (int?)department.Department_ID)
                 .FirstOrDefault();
         }
@@ -60,21 +64,11 @@ namespace APINIMIRHEMAA.Controllers
                 string.Equals(jobOrder.Status, "Complited", StringComparison.OrdinalIgnoreCase);
         }
 
-        private bool IsDeliveryReceiptApprover()
+        private bool IsProductionApprover()
         {
-            var role = User.FindFirstValue(ClaimTypes.Role) ?? "";
-            if (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(role, "Super Admin", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            var department = User.FindFirstValue("Department") ?? "";
-            var normalizedDepartment = new string(
-                department.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-            return (string.Equals(role, "Department Manager", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(role, "Department Head", StringComparison.OrdinalIgnoreCase)) &&
-                normalizedDepartment == "production";
+            return _Localdb.HasGlobalRecordAccess ||
+                (_Localdb.IsDepartmentManager &&
+                    ModuleAccess.GetModuleForDepartment(_Localdb.CurrentDepartmentName) == "production");
         }
 
         [HttpGet("GetInstallationReportJobOrders")]
@@ -298,6 +292,11 @@ namespace APINIMIRHEMAA.Controllers
             int id,
             CancellationToken cancellationToken)
         {
+            if (!IsProductionApprover())
+            {
+                return Forbid();
+            }
+
             if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var approverUserId))
             {
                 return Unauthorized("Your session is invalid. Please sign in again.");
@@ -369,10 +368,6 @@ namespace APINIMIRHEMAA.Controllers
         public async Task<ActionResult<List<DeliveryReceipt>>> GetDeliveryReceiptApprovalQueue(
             CancellationToken cancellationToken)
         {
-            if (!IsDeliveryReceiptApprover())
-            {
-                return Forbid();
-            }
             var receipts = await _Localdb.DeliveryReceipt
                 .IgnoreQueryFilters()
                 .AsNoTracking()
@@ -406,10 +401,6 @@ namespace APINIMIRHEMAA.Controllers
         public async Task<ActionResult<List<DeliveryReceiptItems>>> GetDeliveryReceiptApprovalItems(
             CancellationToken cancellationToken)
         {
-            if (!IsDeliveryReceiptApprover())
-            {
-                return Forbid();
-            }
             var items = await _Localdb.DeliveryReceiptItems
                 .IgnoreQueryFilters()
                 .AsNoTracking()
@@ -423,10 +414,6 @@ namespace APINIMIRHEMAA.Controllers
         public async Task<ActionResult<List<DeliveryFiles>>> GetDeliveryReceiptApprovalSignatures(
             CancellationToken cancellationToken)
         {
-            if (!IsDeliveryReceiptApprover())
-            {
-                return Forbid();
-            }
             var files = await _Localdb.DeliveryFiles
                 .IgnoreQueryFilters()
                 .AsNoTracking()
@@ -468,10 +455,6 @@ namespace APINIMIRHEMAA.Controllers
             string status,
             CancellationToken cancellationToken)
         {
-            if (!IsDeliveryReceiptApprover())
-            {
-                return Forbid();
-            }
             if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var approverUserId))
             {
                 return Unauthorized("Your session is invalid. Please sign in again.");
@@ -1060,7 +1043,8 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid job order, date, and mall-hours group are required.");
             }
-            var jobOrder = _Localdb.JobOrder.FirstOrDefault(record => record.JobOrder_ID == installationSchedule.JobOrder_ID);
+            var jobOrder = GetProductionVisibleJobOrders()
+                .FirstOrDefault(record => record.JobOrder_ID == installationSchedule.JobOrder_ID);
             if (jobOrder == null)
             {
                 return BadRequest("The selected Job Order was not found.");
@@ -1093,7 +1077,8 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound();
             }
 
-            var jobOrder = _Localdb.JobOrder.FirstOrDefault(record => record.JobOrder_ID == installationSchedule.JobOrder_ID);
+            var jobOrder = GetProductionVisibleJobOrders()
+                .FirstOrDefault(record => record.JobOrder_ID == installationSchedule.JobOrder_ID);
             if (jobOrder == null)
             {
                 return BadRequest("The selected Job Order was not found.");
@@ -1113,7 +1098,8 @@ namespace APINIMIRHEMAA.Controllers
 
             if (previousJobOrderId != installationSchedule.JobOrder_ID)
             {
-                var previousJobOrder = _Localdb.JobOrder.FirstOrDefault(record => record.JobOrder_ID == previousJobOrderId);
+                var previousJobOrder = GetProductionVisibleJobOrders()
+                    .FirstOrDefault(record => record.JobOrder_ID == previousJobOrderId);
                 if (previousJobOrder != null)
                 {
                     previousJobOrder.Installation_Date = _Localdb.Installation_Schedule
@@ -1147,7 +1133,7 @@ namespace APINIMIRHEMAA.Controllers
                 .FirstOrDefaultAsync(schedule => schedule.Installation_ID == id);
             var associatedJobOrder = scheduleToDelete == null
                 ? null
-                : await _Localdb.JobOrder
+                : await GetProductionVisibleJobOrders()
                     .FirstOrDefaultAsync(record => record.JobOrder_ID == scheduleToDelete.JobOrder_ID);
             var conforme = associatedJobOrder == null
                 ? null
@@ -1251,14 +1237,15 @@ namespace APINIMIRHEMAA.Controllers
                 .Where(employee =>
                     employee.Date_Resigned == null &&
                     employee.Department_ID == productionDepartmentId.Value)
-                .OrderBy(employee => employee.LastName)
-                .ThenBy(employee => employee.FirstName)
                 .Select(employee => new InstallationScheduleEmployeeOptionDto
                 {
                     Employee_Id = employee.Employee_Id,
                     FirstName = employee.FirstName,
                     LastName = employee.LastName
                 })
+                .ToList()
+                .OrderBy(employee => employee.LastName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(employee => employee.FirstName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             return Ok(employees);
@@ -1271,7 +1258,6 @@ namespace APINIMIRHEMAA.Controllers
                 from assignment in _Localdb.Installation_Schedule_Employee.AsNoTracking()
                 join employee in _Localdb.Employee.AsNoTracking()
                     on assignment.Employee_Id equals employee.Employee_Id
-                orderby assignment.Installation_ID, employee.LastName, employee.FirstName
                 select new InstallationScheduleEmployeeAssignmentDto
                 {
                     Installation_ID = assignment.Installation_ID,
@@ -1279,6 +1265,10 @@ namespace APINIMIRHEMAA.Controllers
                     FirstName = employee.FirstName,
                     LastName = employee.LastName
                 })
+                .ToList()
+                .OrderBy(assignment => assignment.Installation_ID)
+                .ThenBy(assignment => assignment.LastName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(assignment => assignment.FirstName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             return Ok(assignments);
@@ -1388,7 +1378,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid job order, date, and mall-hours group are required.");
             }
-            if (!_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
+            if (!_CloudDb.JobOrder.IgnoreQueryFilters().Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
             {
                 return BadRequest("The selected Job Order was not found.");
             }
@@ -1409,7 +1399,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("A valid schedule row, job order, date, and mall-hours group are required.");
             }
-            if (!_CloudDb.JobOrder.Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
+            if (!_CloudDb.JobOrder.IgnoreQueryFilters().Any(jobOrder => jobOrder.JobOrder_ID == installationSchedule.JobOrder_ID))
             {
                 return BadRequest("The selected Job Order was not found.");
             }
@@ -1451,6 +1441,62 @@ namespace APINIMIRHEMAA.Controllers
         // ----------------------------------- INSTALLATION SCHEDULE -----------------------------------
 
         // --------------------------- MATERIALS REQUESITION SLIP ---------------------------
+
+        [HttpGet("GetMaterialRequisitionInventory")]
+        public async Task<IActionResult> GetMaterialRequisitionInventory(
+            CancellationToken cancellationToken)
+        {
+            var inventory = await MaterialRequisitionLookupQueries.GetInventoryOptionsAsync(
+                _Localdb,
+                cancellationToken);
+            return Ok(inventory);
+        }
+
+        [HttpGet("GetMaterialRequisitionPurchaseReceipts")]
+        public async Task<IActionResult> GetMaterialRequisitionPurchaseReceipts(
+            int materialId,
+            CancellationToken cancellationToken)
+        {
+            if (materialId <= 0)
+            {
+                return BadRequest("A valid material ID is required.");
+            }
+
+            var receipts = await MaterialRequisitionLookupQueries.GetPurchaseReceiptOptionsAsync(
+                _Localdb,
+                materialId,
+                cancellationToken);
+            return Ok(receipts);
+        }
+
+        [HttpPost("PreviewMaterialRequisition")]
+        public ActionResult PreviewMaterialRequisition([FromBody] RequisitionPreviewDto dto)
+        {
+            var result = MaterialRequisitionWorkflowService.Preview(_Localdb, dto, "Production");
+            return result.Error != null ? BadRequest(result.Error) : Ok(result.Response);
+        }
+
+        [HttpPost("AddMaterialRequisitionBatch")]
+        public async Task<ActionResult> AddMaterialRequisitionBatch(
+            [FromBody] List<MaterialRequesition_Slip> slips,
+            CancellationToken cancellationToken)
+        {
+            if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var submitterUserId))
+            {
+                return Unauthorized("Your session is invalid. Please sign in again.");
+            }
+
+            var result = await MaterialRequisitionWorkflowService.SubmitBatchAsync(
+                _Localdb,
+                _notificationService,
+                slips,
+                submitterUserId,
+                "Production",
+                cancellationToken);
+            return result.Error != null
+                ? BadRequest(result.Error)
+                : Ok(new { saved = result.Saved });
+        }
 
         [HttpGet("GetLocalMaterialRequesitionSlips")]
         public List<MaterialRequesition_Slip> GetAllLocalMaterialRequesitionSlips()

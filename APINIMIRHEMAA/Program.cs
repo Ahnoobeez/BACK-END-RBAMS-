@@ -94,7 +94,7 @@ var dataProtectionKeyPath = !string.IsNullOrWhiteSpace(
 Directory.CreateDirectory(dataProtectionKeyPath);
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeyPath));
-builder.Services.AddScoped<EncryptionService>();
+builder.Services.AddSingleton<EncryptionService>();
 
 var app = builder.Build();
 

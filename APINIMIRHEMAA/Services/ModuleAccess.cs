@@ -5,32 +5,57 @@
         public static readonly string[] AllModules =
             { "analytics", "marketing", "technical", "production", "warehouse", "admin" };
 
+        public static bool IsAdministratorRole(string? role)
+        {
+            var normalizedRole = Normalize(role);
+            return normalizedRole is "admin" or "superadmin";
+        }
+
+        public static bool IsDepartmentManagerRole(string? role)
+        {
+            var normalizedRole = Normalize(role);
+            return normalizedRole is "departmentmanager" or "departmenthead";
+        }
+
+        public static string? GetModuleForDepartment(string? department)
+        {
+            var normalizedDepartment = Normalize(department);
+            if (normalizedDepartment.Contains("marketing") || normalizedDepartment.Contains("sales"))
+                return "marketing";
+            if (normalizedDepartment.Contains("technical") || normalizedDepartment.Contains("design"))
+                return "technical";
+            if (normalizedDepartment.Contains("production") || normalizedDepartment.Contains("joborder"))
+                return "production";
+            if (normalizedDepartment.Contains("inventory") || normalizedDepartment.Contains("warehouse"))
+                return "warehouse";
+            return null;
+        }
+
         public static List<string> GetModules(string role, string department)
         {
-            // Super Admin and Admin roles see everything
-            if (role == "Super Admin" || role == "Admin")
+            if (IsAdministratorRole(role))
                 return AllModules.ToList();
 
-            var modules = new List<string> { "analytics" };
-
-            // Everyone else gets their own department's module
-            switch (department)
-            {
-                case "Marketing": modules.Add("marketing"); break;
-                case "Technical": modules.Add("technical"); break;
-                case "Production": modules.Add("production"); break;
-                case "Inventory": modules.Add("warehouse"); break;
-                case "Admin": modules.Add("admin"); break;
-            }
-
-            // Department Managers also get the analytics dashboard
-            if (role == "Department Manager")
-                modules.Add("dashboard");
+            var modules = new List<string>();
+            var departmentModule = GetModuleForDepartment(department);
+            if (departmentModule != null)
+                modules.Add(departmentModule);
 
             return modules;
         }
 
         public static bool CanAccess(string role, string department, string module)
-            => GetModules(role, department).Contains(module);
+        {
+            if (IsAdministratorRole(role))
+                return AllModules.Contains(module, StringComparer.OrdinalIgnoreCase);
+            if (string.Equals(module, "admin", StringComparison.OrdinalIgnoreCase))
+                return false;
+            return GetModules(role, department).Contains(module, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string Normalize(string? value) =>
+            new((value ?? "").Where(char.IsLetterOrDigit)
+                .Select(char.ToLowerInvariant)
+                .ToArray());
     }
 }

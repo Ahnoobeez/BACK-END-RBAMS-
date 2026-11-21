@@ -19,6 +19,12 @@ namespace APINIMIRHEMAA.Services
             if (string.IsNullOrEmpty(value))
                 return value ?? string.Empty;
 
+            if (IsProtected(value))
+            {
+                _protector.Unprotect(value);
+                return value;
+            }
+
             return _protector.Protect(value);
         }
 
@@ -34,6 +40,12 @@ namespace APINIMIRHEMAA.Services
             if (value == null || value.Length == 0)
                 return Array.Empty<byte>();
 
+            if (IsProtected(value))
+            {
+                _protector.Unprotect(value);
+                return value;
+            }
+
             return _protector.Protect(value);
         }
 
@@ -43,30 +55,34 @@ namespace APINIMIRHEMAA.Services
             if (value == null || value.Length == 0)
                 return Array.Empty<byte>();
 
-            x`return _protector.Unprotect(value);
+            return _protector.Unprotect(value);
         }
-        public static bool IsProtected(byte[]? v) => v != null && v.Length > 4 && v[0] == 0x09 && v[1] == 0xF0 && v[2] == 0xC9 && v[3] == 0xF0;
+        public static bool IsProtected(byte[]? value) =>
+            value != null &&
+            value.Length > 4 &&
+            value[0] == 0x09 &&
+            value[1] == 0xF0 &&
+            value[2] == 0xC9 &&
+            value[3] == 0xF0;
+
+        public static bool IsProtected(string? value) =>
+            !string.IsNullOrEmpty(value) &&
+            value.StartsWith("CfDJ8", StringComparison.Ordinal);
 
         public byte[] TryDecrypt(byte[]? value)
         {
-            if (value == null || value.Length == 0) return Array.Empty<byte>();
-            if (!IsProtected(value)) return value;   // legacy plaintext row, return as-is
-            try { return _protector.Unprotect(value); }
-            catch (System.Security.Cryptography.CryptographicException ex)
-            {
-                Console.Error.WriteLine("Decrypt failed: " + ex.Message);
+            if (value == null || value.Length == 0)
                 return Array.Empty<byte>();
-            }
+
+            return IsProtected(value) ? _protector.Unprotect(value) : value;
         }
+
         public string TryDecrypt(string? value)
         {
-            if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
-            try { return _protector.Unprotect(value); }
-            catch (System.Security.Cryptography.CryptographicException ex)
-            {
-                Console.Error.WriteLine("Decrypt failed: " + ex.Message);
-                return string.Empty;
-            }
+            if (string.IsNullOrEmpty(value))
+                return value ?? string.Empty;
+
+            return IsProtected(value) ? _protector.Unprotect(value) : value;
         }
     }
 }

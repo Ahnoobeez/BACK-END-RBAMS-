@@ -1,17 +1,21 @@
 using Microsoft.EntityFrameworkCore;
 using APINIMIRHEMAA.Models;
+using APINIMIRHEMAA.Services;
 
 namespace APINIMIRHEMAA.Data
 {
     public class CloudDbContext : DbContext
     {
         private readonly LocalDbContext _localDb;
+        private readonly EncryptionService _encryptionService;
 
         public CloudDbContext(
             DbContextOptions<CloudDbContext> options,
-            LocalDbContext localDb) : base(options)
+            LocalDbContext localDb,
+            EncryptionService encryptionService) : base(options)
         {
             _localDb = localDb;
+            _encryptionService = encryptionService;
         }
         public DbSet<ClientEntity> Clients { get; set; }
         public DbSet<ClientAccessGrant> ClientAccessGrants { get; set; }
@@ -44,6 +48,8 @@ namespace APINIMIRHEMAA.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            EncryptedDataMapping.ConfigureClients(modelBuilder, _encryptionService);
+
             modelBuilder.Entity<ClientAccessGrant>(entity =>
             {
                 entity.ToTable("ClientAccessGrants");
@@ -143,6 +149,7 @@ namespace APINIMIRHEMAA.Data
         private int? CurrentUserId => _localDb.CurrentUserId;
         private int? CurrentDepartmentId => _localDb.CurrentDepartmentId;
         private bool HasGlobalRecordAccess => _localDb.HasGlobalRecordAccess;
+        private bool HasModuleRecordAccess => _localDb.HasModuleRecordAccess;
         private bool IsDepartmentManager => _localDb.IsDepartmentManager;
 
         private void ApplyCreatedByFilters(ModelBuilder modelBuilder)
@@ -156,7 +163,9 @@ namespace APINIMIRHEMAA.Data
 
             foreach (var entityType in entityTypes)
             {
-                if (entityType.ClrType == typeof(Materials) ||
+                // Job Orders are shared across departments; controller policies enforce access.
+                if (entityType.ClrType == typeof(JobOrder) ||
+                    entityType.ClrType == typeof(Materials) ||
                     entityType.ClrType == typeof(Inventory) ||
                     entityType.ClrType == typeof(Purchased_Material))
                 {
@@ -167,6 +176,7 @@ namespace APINIMIRHEMAA.Data
                 {
                     modelBuilder.Entity<ClientEntity>().HasQueryFilter(client =>
                         HasGlobalRecordAccess ||
+                        HasModuleRecordAccess ||
                         (CurrentUserId.HasValue && client.CreatedByUserId == CurrentUserId) ||
                         (IsDepartmentManager &&
                             CurrentUserId.HasValue &&
@@ -189,6 +199,7 @@ namespace APINIMIRHEMAA.Data
         {
             modelBuilder.Entity<TEntity>().HasQueryFilter(record =>
                 HasGlobalRecordAccess ||
+                HasModuleRecordAccess ||
                 (CurrentUserId.HasValue && record.CreatedByUserId == CurrentUserId) ||
                 (IsDepartmentManager &&
                     CurrentUserId.HasValue &&

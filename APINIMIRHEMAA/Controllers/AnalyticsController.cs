@@ -20,6 +20,7 @@ namespace APINIMIRHEMAA.Controllers
             _encryptionService = encryptionService;
         }
 
+        [Authorize(Policy = "admin")]
         [HttpGet("GetCompanyOverview")]
         public ActionResult GetCompanyOverview()
         {

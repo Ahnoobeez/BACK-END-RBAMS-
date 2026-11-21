@@ -47,37 +47,6 @@ namespace APINIMIRHEMAA.Controllers
             return null;
         }
 
-        private string? ValidateRequisitionPurchase(
-            int? purchasedId,
-            int materialId,
-            string? supplierName,
-            int? unitCost)
-        {
-            if (!purchasedId.HasValue || purchasedId.Value <= 0)
-                return "Choose a specific purchase receipt for this material.";
-
-            var purchase = _Localdb.Purchased_Material.AsNoTracking()
-                .FirstOrDefault(record => record.Purchased_ID == purchasedId.Value
-                    && record.Material_ID == materialId);
-            if (purchase == null)
-                return "The selected purchase receipt was not found for this material.";
-
-            if (_Localdb.MaterialRequisition_Slip
-                .IgnoreQueryFilters()
-                .Any(slip => slip.Purchased_ID == purchasedId.Value))
-            {
-                return "This purchase receipt is locked because it is already linked to a saved Material Requisition.";
-            }
-
-            if (!string.Equals(purchase.Supplier_Name?.Trim(), supplierName?.Trim(), StringComparison.OrdinalIgnoreCase))
-                return "The selected purchase receipt does not match the supplier.";
-
-            if (!unitCost.HasValue || unitCost.Value != purchase.Unit_price)
-                return "The selected purchase receipt does not match the unit cost.";
-
-            return null;
-        }
-
         // --------------------------- INVENTORY HELPERS (LOCAL) ---------------------------
 
         private static bool IsPending(string? status) =>
@@ -85,14 +54,8 @@ namespace APINIMIRHEMAA.Controllers
             string.Equals(status.Trim(), "Pending", StringComparison.OrdinalIgnoreCase);
 
         private bool IsWarehouseDepartmentHead() =>
-            string.Equals(
-                User.FindFirstValue(ClaimTypes.Role),
-                "Department Manager",
-                StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(
-                User.FindFirstValue("Department"),
-                "Inventory",
-                StringComparison.OrdinalIgnoreCase);
+            _Localdb.IsDepartmentManager &&
+            ModuleAccess.GetModuleForDepartment(_Localdb.CurrentDepartmentName) == "warehouse";
 
         private int GetPendingDemand(int materialId, int? excludingRequisitionId = null)
         {
@@ -285,6 +248,60 @@ namespace APINIMIRHEMAA.Controllers
         // --------------------------- MATERIALS ---------------------------
 
         // --------------------------- INVENTORY ---------------------------
+
+        [HttpGet("GetMaterialRequisitionDepartments")]
+        public async Task<IActionResult> GetMaterialRequisitionDepartments(
+            CancellationToken cancellationToken)
+        {
+            var departments = await _Localdb.Departments
+                .AsNoTracking()
+                .OrderBy(department => department.Department_Name)
+                .Select(department => new
+                {
+                    department.Department_ID,
+                    department.Department_Name
+                })
+                .ToListAsync(cancellationToken);
+
+            return Ok(departments);
+        }
+
+        [HttpGet("GetMaterialRequisitionJobOrders")]
+        public async Task<IActionResult> GetMaterialRequisitionJobOrders(
+            CancellationToken cancellationToken)
+        {
+            var jobOrders = await (
+                from jobOrder in _Localdb.JobOrder.IgnoreQueryFilters().AsNoTracking()
+                join conforme in _Localdb.Conforme.IgnoreQueryFilters().AsNoTracking()
+                    on jobOrder.Conforme_FileID equals conforme.FileID
+                join quotation in _Localdb.Quotation.IgnoreQueryFilters().AsNoTracking()
+                    on conforme.Quotation_ID equals quotation.Quotation_ID
+                join client in _Localdb.Clients.IgnoreQueryFilters().AsNoTracking()
+                    on quotation.Client_ID equals client.Client_ID
+                let status = (jobOrder.Status ?? "").Trim().ToUpper()
+                where status == "PENDING"
+                    || status == "IN PROGRESS (0/2)"
+                    || status == "IN PROGRESS (1/2)"
+                    || (status == ""
+                        && !jobOrder.Technical_Completed
+                        && !jobOrder.Production_Completed)
+                orderby jobOrder.JobOrder_ID descending
+                select new
+                {
+                    JobOrderId = jobOrder.JobOrder_ID,
+                    ClientName = client.Client_Name,
+                    Title = jobOrder.Title,
+                    Status = status == ""
+                        ? "Pending"
+                        : status == "PENDING"
+                            ? "Pending"
+                            : status == "IN PROGRESS (0/2)"
+                                ? "In Progress (0/2)"
+                                : "In Progress (1/2)"
+                }).ToListAsync(cancellationToken);
+
+            return Ok(jobOrders);
+        }
 
         [HttpGet("GetLocalInventory")]
         public List<Inventory> GetAllLocalInventory()
@@ -533,31 +550,8 @@ namespace APINIMIRHEMAA.Controllers
         [HttpPost("PreviewRequisition")]
         public ActionResult PreviewRequisition([FromBody] RequisitionPreviewDto dto)
         {
-            var dirError = InventoryRules.CheckDirection(dto.FromWho, dto.ToWho);
-            if (dirError != null) return BadRequest(dirError);
-
-            var purchaseError = ValidateRequisitionPurchase(
-                dto.Purchased_ID,
-                dto.Material_ID,
-                dto.Supplier,
-                dto.Unit_Cost);
-            if (purchaseError != null) return BadRequest(purchaseError);
-
-            if (InventoryRules.IsWarehouse(dto.ToWho))
-                return Ok(new { usesBuffer = false, fromBuffer = 0, fromPurchased = 0, fromBalance = 0 });
-
-            var inv = _Localdb.Inventory.AsNoTracking().FirstOrDefault(i => i.Material_ID == dto.Material_ID);
-            if (inv == null) return BadRequest("This material has no inventory record.");
-
-            var plan = InventoryRules.IsAdminSupplierReturn(dto.FromWho, dto.ToWho)
-                ? InventoryRules.PlanPurchasedIssue(inv, dto.Quantity)
-                : InventoryRules.PlanIssue(inv, dto.Quantity);
-            if (plan.Error != null) return BadRequest(plan.Error);
-
-            return Ok(new
-            {
-                available = InventoryRules.Available(inv)
-            });
+            var result = MaterialRequisitionWorkflowService.Preview(_Localdb, dto);
+            return result.Error != null ? BadRequest(result.Error) : Ok(result.Response);
         }
 
         [HttpPost("AddLocalMaterialRequisitionSlipBatch")]
@@ -565,82 +559,20 @@ namespace APINIMIRHEMAA.Controllers
             [FromBody] List<MaterialRequesition_Slip> slips,
             CancellationToken cancellationToken)
         {
-            if (slips == null || slips.Count == 0) return BadRequest("No materials.");
-
-            await using var transaction = await _Localdb.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable,
-                cancellationToken);
-            var today = DateOnly.FromDateTime(DateTime.Now);
-            var initializedRequests = new HashSet<int>();
-
             if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var submitterUserId))
             {
                 return Unauthorized("Your session is invalid. Please sign in again.");
             }
-
-            var submitterSignature = _Localdb.UserSignatures
-                .AsNoTracking()
-                .SingleOrDefault(signature => signature.User_ID == submitterUserId);
-            if (submitterSignature == null || submitterSignature.SignatureData.Length == 0)
-            {
-                return BadRequest("Add a signature in Profile Settings before submitting a Material Requisition.");
-            }
-            var submittedBySignature = $"data:image/png;base64,{Convert.ToBase64String(submitterSignature.SignatureData)}";
-
-            for (int i = 0; i < slips.Count; i++)
-            {
-                var s = slips[i];
-                var label = $"Row {i + 1} ({s.Material_Name})";
-
-                if (string.IsNullOrWhiteSpace(s.Control_Number)) return BadRequest($"{label}: control number is required.");
-                if ((s.Quantity ?? 0) <= 0) return BadRequest($"{label}: quantity must be greater than zero.");
-                var quantity = s.Quantity.GetValueOrDefault();
-                if ((s.Unit_Cost ?? 0) < 0) return BadRequest($"{label}: unit cost cannot be negative.");
-                var purchaseError = ValidateRequisitionPurchase(
-                    s.Purchased_ID,
-                    s.Material_ID,
-                    s.Supplier,
-                    s.Unit_Cost);
-                if (purchaseError != null) return BadRequest($"{label}: {purchaseError}");
-
-                var dirError = InventoryRules.CheckDirection(s.FromWho, s.ToWho);
-                if (dirError != null) return BadRequest($"{label}: {dirError}");
-
-                var inv = _Localdb.Inventory.FirstOrDefault(x => x.Material_ID == s.Material_ID);
-                if (inv == null) return BadRequest($"{label}: this material has no inventory record.");
-
-                if (initializedRequests.Add(s.Material_ID))
-                {
-                    inv.Request = GetPendingDemand(s.Material_ID);
-                }
-
-                if (InventoryRules.IsAdminSupplierReturn(s.FromWho, s.ToWho))
-                {
-                    var plan = InventoryRules.PlanPurchasedIssue(inv, quantity);
-                    if (plan.Error != null) return BadRequest($"{label}: {plan.Error}");
-                }
-                else if (InventoryRules.IsWarehouse(s.FromWho))
-                {
-                    var plan = InventoryRules.PlanIssue(inv, quantity);
-                    if (plan.Error != null) return BadRequest($"{label}: {plan.Error}");
-                }
-
-                inv.Request = (inv.Request ?? 0) + quantity;
-                s.MR_ID = 0;
-                s.Total_Cost = s.Quantity * s.Unit_Cost;       // computed here
-                s.Status = "Pending";
-                s.Approved_By = null;
-                s.Submmited_By = submittedBySignature;
-                s.Date = today;                                // server date
-                _Localdb.MaterialRequisition_Slip.Add(s);
-            }
-
-            await _Localdb.SaveChangesAsync(cancellationToken);
-            await _notificationService.NotifyMaterialRequisitionSubmittedAsync(
+            var result = await MaterialRequisitionWorkflowService.SubmitBatchAsync(
+                _Localdb,
+                _notificationService,
                 slips,
+                submitterUserId,
+                null,
                 cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return Ok(new { saved = slips.Count });
+            return result.Error != null
+                ? BadRequest(result.Error)
+                : Ok(new { saved = result.Saved });
         }
 
         [HttpPost("ApproveRequisitions")]

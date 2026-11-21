@@ -50,8 +50,27 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest("A username is required.");
             if (!PasswordPolicy.IsValid(dto.Password))
                 return BadRequest(PasswordPolicy.RequirementMessage);
+
+            if (dto.Employee_ID <= 0)
+                return BadRequest("Select a valid employee.");
+
+            await using var transaction = await _Localdb.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
             if (await _Localdb.Users.AnyAsync(u => u.Username == dto.Username, cancellationToken))
                 return Conflict("That username already exists.");
+            if (!await _Localdb.Employee.AnyAsync(
+                    employee => employee.Employee_Id == dto.Employee_ID,
+                    cancellationToken))
+            {
+                return BadRequest("The selected employee could not be found.");
+            }
+            if (await _Localdb.Users.IgnoreQueryFilters().AnyAsync(
+                    user => user.Employee_ID == dto.Employee_ID,
+                    cancellationToken))
+            {
+                return Conflict("This employee already has a user account.");
+            }
 
             var user = new Users
             {
@@ -63,7 +82,6 @@ namespace APINIMIRHEMAA.Controllers
                 Department_ID = dto.Department_ID,
                 IsActive = true
             };
-            await using var transaction = await _Localdb.Database.BeginTransactionAsync(cancellationToken);
             _Localdb.Users.Add(user);
             await _Localdb.SaveChangesAsync(cancellationToken);
 

@@ -1,4 +1,5 @@
 ﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.DTO;
 using APINIMIRHEMAA.DTO.JobOrders;
 using APINIMIRHEMAA.Models;
 using APINIMIRHEMAA.Services;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace APINIMIRHEMAA.Controllers
 {
@@ -537,6 +539,62 @@ namespace APINIMIRHEMAA.Controllers
         //  ----------------------------------- GRAPHICS -----------------------------------
 
         // --------------------------- MATERIALS REQUESITION SLIP ---------------------------
+
+        [HttpGet("GetMaterialRequisitionInventory")]
+        public async Task<IActionResult> GetMaterialRequisitionInventory(
+            CancellationToken cancellationToken)
+        {
+            var inventory = await MaterialRequisitionLookupQueries.GetInventoryOptionsAsync(
+                _Localdb,
+                cancellationToken);
+            return Ok(inventory);
+        }
+
+        [HttpGet("GetMaterialRequisitionPurchaseReceipts")]
+        public async Task<IActionResult> GetMaterialRequisitionPurchaseReceipts(
+            int materialId,
+            CancellationToken cancellationToken)
+        {
+            if (materialId <= 0)
+            {
+                return BadRequest("A valid material ID is required.");
+            }
+
+            var receipts = await MaterialRequisitionLookupQueries.GetPurchaseReceiptOptionsAsync(
+                _Localdb,
+                materialId,
+                cancellationToken);
+            return Ok(receipts);
+        }
+
+        [HttpPost("PreviewMaterialRequisition")]
+        public ActionResult PreviewMaterialRequisition([FromBody] RequisitionPreviewDto dto)
+        {
+            var result = MaterialRequisitionWorkflowService.Preview(_Localdb, dto, "Technical");
+            return result.Error != null ? BadRequest(result.Error) : Ok(result.Response);
+        }
+
+        [HttpPost("AddMaterialRequisitionBatch")]
+        public async Task<ActionResult> AddMaterialRequisitionBatch(
+            [FromBody] List<MaterialRequesition_Slip> slips,
+            CancellationToken cancellationToken)
+        {
+            if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var submitterUserId))
+            {
+                return Unauthorized("Your session is invalid. Please sign in again.");
+            }
+
+            var result = await MaterialRequisitionWorkflowService.SubmitBatchAsync(
+                _Localdb,
+                _notificationService,
+                slips,
+                submitterUserId,
+                "Technical",
+                cancellationToken);
+            return result.Error != null
+                ? BadRequest(result.Error)
+                : Ok(new { saved = result.Saved });
+        }
 
         [HttpGet("GetLocalMaterialRequesitionSlips")]
         public List<MaterialRequesition_Slip> GetAllLocalMaterialRequesitionSlips()

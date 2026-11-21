@@ -1,5 +1,6 @@
 using APINIMIRHEMAA.DTO.Admin;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -7,6 +8,16 @@ using System.Security.Claims;
 
 namespace APINIMIRHEMAA.Services
 {
+    public static class RecordAccessScope
+    {
+        public const string SystemAdministrator = "RecordAccessScope.SystemAdministrator";
+        public const string Module = "RecordAccessScope.Module";
+        public const string RoleName = "RecordAccessScope.RoleName";
+        public const string DepartmentName = "RecordAccessScope.DepartmentName";
+        public const string DepartmentId = "RecordAccessScope.DepartmentId";
+        public const string DepartmentManager = "RecordAccessScope.DepartmentManager";
+    }
+
     public sealed class ModuleAccessRequirement : IAuthorizationRequirement
     {
         public ModuleAccessRequirement(string module)
@@ -20,10 +31,14 @@ namespace APINIMIRHEMAA.Services
     public sealed class ModuleAccessAuthorizationHandler : AuthorizationHandler<ModuleAccessRequirement>
     {
         private readonly AccessPermissionService _permissions;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
-        public ModuleAccessAuthorizationHandler(AccessPermissionService permissions)
+        public ModuleAccessAuthorizationHandler(
+            AccessPermissionService permissions,
+            IHttpContextAccessor httpContextAccessor)
         {
             _permissions = permissions;
+            _httpContextAccessor = httpContextAccessor;
         }
 
         protected override async Task HandleRequirementAsync(
@@ -34,18 +49,44 @@ namespace APINIMIRHEMAA.Services
             if (!int.TryParse(userIdValue, out var userId))
                 return;
 
-            var roleName = context.User.FindFirstValue(ClaimTypes.Role) ?? "";
-            var departmentName = context.User.FindFirstValue("Department") ?? "";
+            var identity = await _permissions.GetCurrentIdentityAsync(userId);
+            if (identity == null)
+                return;
+
+            var isSystemAdministrator = ModuleAccess.IsAdministratorRole(identity.RoleName);
+            var httpContext = _httpContextAccessor.HttpContext;
+            if (httpContext != null)
+            {
+                httpContext.Items[RecordAccessScope.SystemAdministrator] = isSystemAdministrator;
+                httpContext.Items[RecordAccessScope.RoleName] = identity.RoleName;
+                httpContext.Items[RecordAccessScope.DepartmentName] = identity.DepartmentName;
+                httpContext.Items[RecordAccessScope.DepartmentId] = identity.DepartmentId;
+                httpContext.Items[RecordAccessScope.DepartmentManager] =
+                    ModuleAccess.IsDepartmentManagerRole(identity.RoleName);
+            }
+
+            if (isSystemAdministrator)
+            {
+                context.Succeed(requirement);
+                return;
+            }
+            if (string.Equals(requirement.Module, "admin", StringComparison.OrdinalIgnoreCase))
+                return;
+
             var permissions = await _permissions.GetEffectivePermissionsAsync(userId, null, null);
             var readableModules = AccessPermissionService.GetReadableModules(
-                permissions, roleName, departmentName);
+                permissions, false);
 
             var allowed = requirement.Module == "clients"
                 ? new[] { "marketing", "technical", "production", "admin" }
                     .Any(module => readableModules.Contains(module))
                 : readableModules.Contains(requirement.Module);
             if (allowed)
+            {
+                if (httpContext != null)
+                httpContext.Items[RecordAccessScope.Module] = true;
                 context.Succeed(requirement);
+            }
         }
     }
 
@@ -64,13 +105,51 @@ namespace APINIMIRHEMAA.Services
         {
             var user = context.HttpContext.User;
             if (user.Identity?.IsAuthenticated != true ||
-                context.ActionDescriptor is not ControllerActionDescriptor actionDescriptor ||
-                !AccessPermissionCatalog.TryResolveService(
+                context.ActionDescriptor is not ControllerActionDescriptor actionDescriptor)
+            {
+                await next();
+                return;
+            }
+
+            if (!AccessPermissionCatalog.TryResolveService(
                     actionDescriptor.ControllerName,
                     actionDescriptor.ActionName,
                     out var serviceKey))
             {
-                await next();
+                if (IsExplicitlySystemAdministratorOnly(actionDescriptor))
+                {
+                    var explicitAdministratorId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+                    if (int.TryParse(explicitAdministratorId, out var explicitAdministratorUserId) &&
+                        await _permissions.IsSystemAdministratorAsync(explicitAdministratorUserId))
+                    {
+                        context.HttpContext.Items[RecordAccessScope.SystemAdministrator] = true;
+                        await next();
+                    }
+                    else
+                    {
+                        context.Result = new ForbidResult();
+                    }
+                    return;
+                }
+
+                if (!AccessPermissionCatalog.IsPermissionManagedController(
+                        actionDescriptor.ControllerName))
+                {
+                    await next();
+                    return;
+                }
+
+                var administratorId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (int.TryParse(administratorId, out var administratorUserId) &&
+                    await _permissions.IsSystemAdministratorAsync(administratorUserId))
+                {
+                    context.HttpContext.Items[RecordAccessScope.SystemAdministrator] = true;
+                    context.HttpContext.Items[RecordAccessScope.Module] = true;
+                    await next();
+                    return;
+                }
+
+                context.Result = new ForbidResult();
                 return;
             }
 
@@ -110,7 +189,23 @@ namespace APINIMIRHEMAA.Services
                 return;
             }
 
+            context.HttpContext.Items[RecordAccessScope.Module] = true;
             await next();
+        }
+
+        private static bool IsExplicitlySystemAdministratorOnly(
+            ControllerActionDescriptor actionDescriptor)
+        {
+            var authorizationData = actionDescriptor.EndpointMetadata
+                .OfType<IAuthorizeData>()
+                .ToList();
+            return authorizationData.Any(data =>
+                    string.Equals(data.Policy, "admin", StringComparison.OrdinalIgnoreCase)) ||
+                authorizationData
+                    .Where(data => !string.IsNullOrWhiteSpace(data.Roles))
+                    .Any(data => data.Roles!
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .All(ModuleAccess.IsAdministratorRole));
         }
     }
 }

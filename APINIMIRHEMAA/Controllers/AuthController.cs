@@ -392,7 +392,7 @@ namespace APINIMIRHEMAA.Controllers
             var permissions = await _accessPermissions.GetEffectivePermissionsAsync(
                 user.User_ID, null, null);
             var modules = AccessPermissionService.GetReadableModules(
-                permissions, role.Role_Name, department.Department_Name);
+                permissions, ModuleAccess.IsAdministratorRole(role.Role_Name));
 
             return new
             {

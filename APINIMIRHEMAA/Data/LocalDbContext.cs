@@ -13,15 +13,18 @@ namespace APINIMIRHEMAA.Data
     {
         private readonly IHttpContextAccessor _http;
         private readonly UndoOperationStore _undoOperationStore;
+        private readonly EncryptionService _encryptionService;
         private int? _currentDepartmentId;
         private bool _currentDepartmentIdResolved;
         public LocalDbContext(
             DbContextOptions<LocalDbContext> options,
             IHttpContextAccessor http,
-            UndoOperationStore undoOperationStore) : base(options)
+            UndoOperationStore undoOperationStore,
+            EncryptionService encryptionService) : base(options)
         {
             _http = http;
             _undoOperationStore = undoOperationStore;
+            _encryptionService = encryptionService;
         }
         public DbSet<ClientEntity> Clients { get; set; }
         public DbSet<ClientAccessGrant> ClientAccessGrants { get; set; }
@@ -72,6 +75,9 @@ namespace APINIMIRHEMAA.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            EncryptedDataMapping.ConfigureClients(modelBuilder, _encryptionService);
+            EncryptedDataMapping.ConfigureLocalRecords(modelBuilder, _encryptionService);
+
             modelBuilder.Entity<ClientAccessGrant>(entity =>
             {
                 entity.ToTable("ClientAccessGrants");
@@ -515,19 +521,20 @@ namespace APINIMIRHEMAA.Data
 
         public bool HasGlobalRecordAccess
         {
-            get
-            {
-                var role = _http.HttpContext?.User.FindFirstValue(ClaimTypes.Role);
-                return string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(role, "Super Admin", StringComparison.OrdinalIgnoreCase);
-            }
+            get => _http.HttpContext?.Items[RecordAccessScope.SystemAdministrator] is true;
         }
 
+        public bool HasModuleRecordAccess =>
+            _http.HttpContext?.Items[RecordAccessScope.Module] is true;
+
         public bool IsDepartmentManager =>
-            string.Equals(
-                _http.HttpContext?.User.FindFirstValue(ClaimTypes.Role),
-                "Department Manager",
-                StringComparison.OrdinalIgnoreCase);
+            _http.HttpContext?.Items[RecordAccessScope.DepartmentManager] is true;
+
+        public string CurrentRoleName =>
+            _http.HttpContext?.Items[RecordAccessScope.RoleName] as string ?? "";
+
+        public string CurrentDepartmentName =>
+            _http.HttpContext?.Items[RecordAccessScope.DepartmentName] as string ?? "";
 
         public int? CurrentDepartmentId => GetCurrentDepartmentId();
 
@@ -538,10 +545,10 @@ namespace APINIMIRHEMAA.Data
                 return _currentDepartmentId;
             }
 
-            var departmentClaim = _http.HttpContext?.User.FindFirstValue("DepartmentId");
-            if (int.TryParse(departmentClaim, out var departmentId) && departmentId > 0)
+            var departmentValue = _http.HttpContext?.Items[RecordAccessScope.DepartmentId];
+            if (departmentValue is int authorizedDepartmentId && authorizedDepartmentId > 0)
             {
-                _currentDepartmentId = departmentId;
+                _currentDepartmentId = authorizedDepartmentId;
                 _currentDepartmentIdResolved = true;
                 return _currentDepartmentId;
             }
@@ -573,7 +580,9 @@ namespace APINIMIRHEMAA.Data
 
             foreach (var entityType in entityTypes)
             {
-                if (entityType.ClrType == typeof(Materials) ||
+                // Job Orders are shared across departments; controller policies enforce access.
+                if (entityType.ClrType == typeof(JobOrder) ||
+                    entityType.ClrType == typeof(Materials) ||
                     entityType.ClrType == typeof(Inventory) ||
                     entityType.ClrType == typeof(Purchased_Material))
                 {
@@ -584,6 +593,7 @@ namespace APINIMIRHEMAA.Data
                 {
                     modelBuilder.Entity<ClientEntity>().HasQueryFilter(client =>
                         HasGlobalRecordAccess ||
+                            HasModuleRecordAccess ||
                         (CurrentUserId.HasValue && client.CreatedByUserId == CurrentUserId) ||
                         (IsDepartmentManager &&
                             CurrentUserId.HasValue &&
@@ -606,6 +616,7 @@ namespace APINIMIRHEMAA.Data
         {
             modelBuilder.Entity<TEntity>().HasQueryFilter(record =>
                 HasGlobalRecordAccess ||
+                HasModuleRecordAccess ||
                 (CurrentUserId.HasValue && record.CreatedByUserId == CurrentUserId) ||
                 (IsDepartmentManager &&
                     CurrentUserId.HasValue &&

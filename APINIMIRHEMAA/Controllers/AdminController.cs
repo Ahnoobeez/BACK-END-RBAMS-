@@ -45,6 +45,115 @@ namespace APINIMIRHEMAA.Controllers
         }
 
         [Authorize(Roles = "Admin,Super Admin")]
+        [HttpPost("EncryptExistingEmployeeClientData")]
+        public async Task<IActionResult> EncryptExistingEmployeeClientData(
+            CancellationToken cancellationToken)
+        {
+            var employees = await EncryptEntitiesAsync(
+                _Localdb,
+                _Localdb.Employee.AsNoTracking().OrderBy(employee => employee.Employee_Id),
+                new[]
+                {
+                    nameof(Employee.LastName),
+                    nameof(Employee.FirstName),
+                    nameof(Employee.MiddleName),
+                    nameof(Employee.status),
+                    nameof(Employee.Birthday),
+                    nameof(Employee.ContactNumber),
+                    nameof(Employee.SSS_Number),
+                    nameof(Employee.Philhealth_Number),
+                    nameof(Employee.Pagibig_Number),
+                    nameof(Employee.Date_Started),
+                    nameof(Employee.Date_Resigned)
+                },
+                cancellationToken);
+            var localClients = await EncryptEntitiesAsync(
+                _Localdb,
+                _Localdb.Clients.IgnoreQueryFilters().AsNoTracking().OrderBy(client => client.Client_ID),
+                ClientPrivateProperties,
+                cancellationToken);
+            var signatures = await EncryptEntitiesAsync(
+                _Localdb,
+                _Localdb.UserSignatures.AsNoTracking().OrderBy(signature => signature.User_ID),
+                new[] { nameof(UserSignature.SignatureData) },
+                cancellationToken);
+            var employeePhotos = await EncryptEntitiesAsync(
+                _Localdb,
+                _Localdb.EmployeeProfilePhotos.AsNoTracking().OrderBy(photo => photo.Employee_ID),
+                new[] { nameof(EmployeeProfilePhoto.PhotoData) },
+                cancellationToken);
+            var userPhotos = await EncryptEntitiesAsync(
+                _Localdb,
+                _Localdb.UserProfilePhotos.AsNoTracking().OrderBy(photo => photo.User_ID),
+                new[] { nameof(UserProfilePhoto.PhotoData) },
+                cancellationToken);
+            var cloudClients = await EncryptEntitiesAsync(
+                _Clouddb,
+                _Clouddb.Clients.IgnoreQueryFilters().AsNoTracking().OrderBy(client => client.Client_ID),
+                ClientPrivateProperties,
+                cancellationToken);
+
+            return Ok(new
+            {
+                local = new { employees, clients = localClients, signatures, employeePhotos, userPhotos },
+                cloud = new { clients = cloudClients }
+            });
+        }
+
+        private static readonly string[] ClientPrivateProperties =
+        {
+            nameof(ClientEntity.CreatedBy),
+            nameof(ClientEntity.Client_Name),
+            nameof(ClientEntity.Client_Telephone),
+            nameof(ClientEntity.Contact_Person),
+            nameof(ClientEntity.Business_Style),
+            nameof(ClientEntity.Client_EmailAddress),
+            nameof(ClientEntity.TermsAndCondition),
+            nameof(ClientEntity.Company_Address),
+            nameof(ClientEntity.TIN),
+            nameof(ClientEntity.Payment_Terms),
+            nameof(ClientEntity.Price_Per_Square_Inch)
+        };
+
+        private static async Task<int> EncryptEntitiesAsync<TEntity>(
+            DbContext context,
+            IQueryable<TEntity> source,
+            IReadOnlyCollection<string> privateProperties,
+            CancellationToken cancellationToken)
+            where TEntity : class
+        {
+            const int batchSize = 100;
+            var processedCount = 0;
+            var offset = 0;
+
+            while (true)
+            {
+                var batch = await source
+                    .Skip(offset)
+                    .Take(batchSize)
+                    .ToListAsync(cancellationToken);
+                if (batch.Count == 0)
+                {
+                    return processedCount;
+                }
+
+                foreach (var entity in batch)
+                {
+                    var entry = context.Attach(entity);
+                    foreach (var property in privateProperties)
+                    {
+                        entry.Property(property).IsModified = true;
+                    }
+                }
+
+                await context.SaveChangesAsync(cancellationToken);
+                context.ChangeTracker.Clear();
+                processedCount += batch.Count;
+                offset += batch.Count;
+            }
+        }
+
+        [Authorize(Roles = "Admin,Super Admin")]
         [HttpGet("CompanyOverviewReport")]
         public async Task<ActionResult<CompanyOverviewReportDto>> GetCompanyOverviewReport(
             [FromQuery] DateOnly? from,
@@ -1042,20 +1151,35 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(new { message = "Enter exactly 11 digits for the phone number." });
             }
 
-            if (!employee.Department_ID.HasValue ||
-                !await _Localdb.Departments.AnyAsync(
-                    department => department.Department_ID == employee.Department_ID.Value,
-                    cancellationToken))
+            var department = employee.Department_ID.HasValue
+                ? await _Localdb.Departments.AsNoTracking().FirstOrDefaultAsync(
+                    record => record.Department_ID == employee.Department_ID.Value,
+                    cancellationToken)
+                : null;
+            if (department == null)
             {
                 return BadRequest(new { message = "Select a valid department." });
             }
 
-            if (!employee.Role_ID.HasValue ||
-                !await _Localdb.Roles.AnyAsync(
-                    role => role.Role_ID == employee.Role_ID.Value,
-                    cancellationToken))
+            var role = employee.Role_ID.HasValue
+                ? await _Localdb.Roles.AsNoTracking().FirstOrDefaultAsync(
+                    record => record.Role_ID == employee.Role_ID.Value,
+                    cancellationToken)
+                : null;
+            if (role == null)
             {
                 return BadRequest(new { message = "Select a valid role." });
+            }
+            if (ModuleAccess.IsAdministratorRole(role.Role_Name) &&
+                !string.Equals(
+                    department.Department_Name.Trim(),
+                    "Admin",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new
+                {
+                    message = "Admin and Super Admin roles can only be assigned to the Admin department."
+                });
             }
 
             await using var transaction = await _Localdb.Database.BeginTransactionAsync(
@@ -1307,15 +1431,27 @@ namespace APINIMIRHEMAA.Controllers
                 from account in MarketingUsers().AsNoTracking()
                 join employee in _Localdb.Employee.AsNoTracking()
                     on account.Employee_ID equals employee.Employee_Id
-                orderby employee.LastName, employee.FirstName
-                select new ClientAccessEmployeeDto
+                select new
                 {
-                    User_ID = account.User_ID,
+                    account.User_ID,
                     Employee_ID = employee.Employee_Id,
-                    Employee_Name = ((employee.FirstName ?? "") + " " + (employee.LastName ?? "")).Trim(),
-                    Username = account.Username,
-                    IsActive = account.IsActive
+                    employee.FirstName,
+                    employee.LastName,
+                    account.Username,
+                    account.IsActive
                 }).ToListAsync(cancellationToken);
+            var orderedMarketingEmployees = marketingEmployees
+                .OrderBy(employee => employee.LastName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(employee => employee.FirstName, StringComparer.OrdinalIgnoreCase)
+                .Select(employee => new ClientAccessEmployeeDto
+                {
+                    User_ID = employee.User_ID,
+                    Employee_ID = employee.Employee_ID,
+                    Employee_Name = ((employee.FirstName ?? "") + " " + (employee.LastName ?? "")).Trim(),
+                    Username = employee.Username,
+                    IsActive = employee.IsActive
+                })
+                .ToList();
 
             var clientOwnerIds = await _Localdb.Clients
                 .IgnoreQueryFilters()
@@ -1324,14 +1460,14 @@ namespace APINIMIRHEMAA.Controllers
                 .Select(client => client.CreatedByUserId.Value)
                 .Distinct()
                 .ToListAsync(cancellationToken);
-            var marketingOwners = marketingEmployees
+            var marketingOwners = orderedMarketingEmployees
                 .Where(employee => clientOwnerIds.Contains(employee.User_ID))
                 .ToList();
 
             return Ok(new
             {
                 marketingOwners,
-                marketingEmployees
+                marketingEmployees = orderedMarketingEmployees
             });
         }
 
@@ -1351,7 +1487,6 @@ namespace APINIMIRHEMAA.Controllers
                 .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Where(client => client.CreatedByUserId == userId)
-                .OrderBy(client => client.Client_Name)
                 .Select(client => new
                 {
                     client.Client_ID,
@@ -1359,7 +1494,9 @@ namespace APINIMIRHEMAA.Controllers
                 })
                 .ToListAsync(cancellationToken);
 
-            return Ok(clients);
+            return Ok(clients
+                .OrderBy(client => client.Client_Name, StringComparer.OrdinalIgnoreCase)
+                .ToList());
         }
 
         [HttpGet("ClientAccessGrants")]
@@ -1374,18 +1511,32 @@ namespace APINIMIRHEMAA.Controllers
                     on grant.User_ID equals account.User_ID
                 join employee in _Localdb.Employee.AsNoTracking()
                     on account.Employee_ID equals employee.Employee_Id
-                orderby client.Client_Name, employee.LastName, employee.FirstName
-                select new ClientAccessGrantDto
+                select new
                 {
                     Client_ID = client.Client_ID,
                     Client_Name = client.Client_Name,
                     User_ID = account.User_ID,
                     Employee_Name = ((employee.FirstName ?? "") + " " + (employee.LastName ?? "")).Trim(),
+                    employee.LastName,
+                    employee.FirstName,
                     Username = account.Username,
                     GrantedAtUtc = grant.GrantedAtUtc
                 }).ToListAsync(cancellationToken);
 
-            return Ok(grants);
+            return Ok(grants
+                .OrderBy(grant => grant.Client_Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(grant => grant.LastName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(grant => grant.FirstName, StringComparer.OrdinalIgnoreCase)
+                .Select(grant => new ClientAccessGrantDto
+                {
+                    Client_ID = grant.Client_ID,
+                    Client_Name = grant.Client_Name,
+                    User_ID = grant.User_ID,
+                    Employee_Name = grant.Employee_Name,
+                    Username = grant.Username,
+                    GrantedAtUtc = grant.GrantedAtUtc
+                })
+                .ToList());
         }
 
         [HttpPost("ClientAccessGrants")]

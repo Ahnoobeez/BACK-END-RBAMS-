@@ -19,9 +19,15 @@ namespace APINIMIRHEMAA.Services
             var isSignatureEndpoint =
                 string.Equals(path, "/api/UserSignature/me", StringComparison.OrdinalIgnoreCase) &&
                 (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method));
+            var isDeliveryReceiptApprovalReadEndpoint =
+                HttpMethods.IsGet(context.Request.Method) &&
+                (string.Equals(path, "/api/Production/GetDeliveryReceiptApprovalQueue", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(path, "/api/Production/GetDeliveryReceiptApprovalItems", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(path, "/api/Production/GetDeliveryReceiptApprovalSignatures", StringComparison.OrdinalIgnoreCase));
 
             if (!path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase) ||
                 isSignatureEndpoint ||
+                isDeliveryReceiptApprovalReadEndpoint ||
                 context.User.Identity?.IsAuthenticated != true)
             {
                 await _next(context);

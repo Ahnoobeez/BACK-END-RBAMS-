@@ -6,6 +6,10 @@ using Microsoft.EntityFrameworkCore;
 namespace APINIMIRHEMAA.Services
 {
     public sealed record AccessPermissionServiceDefinition(string ModuleKey, string ServiceKey, string Label);
+    public sealed record AccessControlIdentity(
+        string RoleName,
+        string DepartmentName,
+        int DepartmentId);
 
     public static class AccessPermissionCatalog
     {
@@ -41,6 +45,10 @@ namespace APINIMIRHEMAA.Services
             Services.Any(service => service.ServiceKey == serviceKey) &&
             Actions.Contains(actionKey, StringComparer.Ordinal);
 
+        public static bool IsPermissionManagedController(string controller) =>
+            controller is "Analytics" or "Clients" or "Inventory" or "Marketing" or
+                "Production" or "ProjectViewer" or "Technical";
+
         public static bool TryResolveService(string controller, string action, out string serviceKey)
         {
             var name = Normalize(action);
@@ -55,8 +63,11 @@ namespace APINIMIRHEMAA.Services
                     return true;
                 case "Marketing":
                     serviceKey = Match(name,
+                        ("installationreport", "marketing.installation-schedule"),
                         ("serviceinvoice", "marketing.service-invoice"),
                         ("installationschedule", "marketing.installation-schedule"),
+                        ("issuedby", "marketing.collection-receipt"),
+                        ("deliveryfiles", "marketing.delivery-receipt"),
                         ("collectionreceipt", "marketing.collection-receipt"),
                         ("deliveryreceipt", "marketing.delivery-receipt"),
                         ("purchaseorder", "marketing.purchase-order"),
@@ -78,17 +89,27 @@ namespace APINIMIRHEMAA.Services
                         ("installationreport", "production.installation-report"),
                         ("materialrequisition", "production.material-requisition"),
                         ("materialrequesition", "production.material-requisition"),
+                        ("deliveryreceipt", "production.job-order"),
+                        ("graphics", "production.job-order"),
+                        ("client", "production.job-order"),
+                        ("conforme", "production.job-order"),
+                        ("quotation", "production.job-order"),
                         ("joborder", "production.job-order"));
                     return !string.IsNullOrEmpty(serviceKey);
                 case "Inventory":
                     serviceKey = Match(name,
                         ("purchasedmaterial", "warehouse.purchased-materials"),
+                        ("requisition", "warehouse.material-requisition"),
                         ("materialrequisition", "warehouse.material-requisition"),
                         ("materialrequesition", "warehouse.material-requisition"),
                         ("stocktransfer", "warehouse.saved-records"),
                         ("transmittal", "warehouse.saved-records"),
                         ("inventory", "warehouse.inventory-master"),
                         ("material", "warehouse.inventory-master"));
+                    return !string.IsNullOrEmpty(serviceKey);
+                case "Analytics":
+                    serviceKey = Match(name,
+                        ("marketingoverview", "marketing.quotation-builder"));
                     return !string.IsNullOrEmpty(serviceKey);
                 default:
                     return false;
@@ -147,6 +168,23 @@ namespace APINIMIRHEMAA.Services
             _context = context;
         }
 
+        public async Task<AccessControlIdentity?> GetCurrentIdentityAsync(
+            int userId,
+            CancellationToken cancellationToken = default)
+        {
+            return await (
+                from user in _context.Users.AsNoTracking()
+                join role in _context.Roles.AsNoTracking() on user.Role_ID equals role.Role_ID
+                join department in _context.Departments.AsNoTracking()
+                    on user.Department_ID equals department.Department_ID
+                where user.User_ID == userId && user.IsActive
+                select new AccessControlIdentity(
+                    role.Role_Name,
+                    department.Department_Name,
+                    department.Department_ID))
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
         public async Task<List<AccessPermissionValueDto>> GetEffectivePermissionsAsync(
             int? userId,
             int? roleId,
@@ -157,11 +195,12 @@ namespace APINIMIRHEMAA.Services
             {
                 var user = await _context.Users.AsNoTracking()
                     .FirstOrDefaultAsync(item => item.User_ID == userId.Value, cancellationToken);
-                if (user != null)
+                if (user == null || !user.IsActive)
                 {
-                    roleId = user.Role_ID;
-                    departmentId = user.Department_ID;
+                    return CreateCompleteMatrix(false);
                 }
+                roleId = user.Role_ID;
+                departmentId = user.Department_ID;
             }
 
             var roleName = roleId.HasValue
@@ -177,6 +216,11 @@ namespace APINIMIRHEMAA.Services
                     .FirstOrDefaultAsync(cancellationToken) ?? ""
                 : "";
 
+            if (ModuleAccess.IsAdministratorRole(roleName))
+            {
+                return CreateCompleteMatrix(true);
+            }
+
             var rules = await _context.AccessPermissions.AsNoTracking()
                 .Where(rule =>
                     (userId.HasValue && rule.User_ID == userId.Value) ||
@@ -187,8 +231,6 @@ namespace APINIMIRHEMAA.Services
             var userRules = userId.HasValue
                 ? ScopeRules(rules.Where(rule => rule.User_ID == userId.Value))
                 : null;
-            if (userRules is { Count: > 0 })
-                return ToCompleteMatrix(userRules, roleName, departmentName);
 
             var hasRoleAndDepartment = roleId.HasValue && departmentId.HasValue;
             var combinedRules = hasRoleAndDepartment
@@ -197,8 +239,6 @@ namespace APINIMIRHEMAA.Services
                     rule.Role_ID == roleId &&
                     rule.Department_ID == departmentId))
                 : null;
-            if (combinedRules is { Count: > 0 })
-                return ToCompleteMatrix(combinedRules, roleName, departmentName);
 
             var roleRules = roleId.HasValue
                 ? ScopeRules(rules.Where(rule =>
@@ -217,15 +257,31 @@ namespace APINIMIRHEMAA.Services
                 .SelectMany(service => AccessPermissionCatalog.Actions.Select(action =>
                 {
                     var key = Key(service.ServiceKey, action);
-                    var hasRoleRule = roleRules is { Count: > 0 };
-                    var hasDepartmentRule = departmentRules is { Count: > 0 };
-                    var allowed = hasRoleRule && hasDepartmentRule
-                        ? ReadRule(roleRules!, key) && ReadRule(departmentRules!, key)
-                        : hasRoleRule
-                            ? ReadRule(roleRules!, key)
-                            : hasDepartmentRule
-                                ? ReadRule(departmentRules!, key)
-                                : ModuleAccess.CanAccess(roleName, departmentName, service.ModuleKey);
+                    bool allowed;
+                    if (userRules != null && userRules.TryGetValue(key, out var userAllowed))
+                    {
+                        allowed = userAllowed;
+                    }
+                    else if (combinedRules != null &&
+                        combinedRules.TryGetValue(key, out var combinedAllowed))
+                    {
+                        allowed = combinedAllowed;
+                    }
+                    else
+                    {
+                        bool? roleAllowed = roleRules != null &&
+                            roleRules.TryGetValue(key, out var roleRule)
+                                ? roleRule
+                                : null;
+                        bool? departmentAllowed = departmentRules != null &&
+                            departmentRules.TryGetValue(key, out var departmentRule)
+                                ? departmentRule
+                                : null;
+                        allowed = roleAllowed.HasValue && departmentAllowed.HasValue
+                            ? roleAllowed.Value && departmentAllowed.Value
+                            : roleAllowed ?? departmentAllowed ??
+                                ModuleAccess.CanAccess(roleName, departmentName, service.ModuleKey);
+                    }
                     return new AccessPermissionValueDto
                     {
                         ServiceKey = service.ServiceKey,
@@ -249,12 +305,24 @@ namespace APINIMIRHEMAA.Services
                 permission.Allowed);
         }
 
+        public async Task<bool> IsSystemAdministratorAsync(
+            int userId,
+            CancellationToken cancellationToken = default)
+        {
+            var identity = await GetCurrentIdentityAsync(userId, cancellationToken);
+            return identity != null && ModuleAccess.IsAdministratorRole(identity.RoleName);
+        }
+
         public static IReadOnlyCollection<string> GetReadableModules(
             IReadOnlyCollection<AccessPermissionValueDto> permissions,
-            string roleName,
-            string departmentName)
+            bool isSystemAdministrator)
         {
-            var modules = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "analytics" };
+            if (isSystemAdministrator)
+            {
+                return ModuleAccess.AllModules.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var modules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var service in AccessPermissionCatalog.Services)
             {
                 if (permissions.Any(permission =>
@@ -266,29 +334,21 @@ namespace APINIMIRHEMAA.Services
                 }
             }
 
-            if (ModuleAccess.CanAccess(roleName, departmentName, "admin"))
-                modules.Add("admin");
+            if (modules.Count > 0)
+                modules.Add("analytics");
             return modules;
         }
 
         private static Dictionary<string, bool> ScopeRules(IEnumerable<AccessPermission> rules) =>
             rules.ToDictionary(rule => Key(rule.ServiceKey, rule.ActionKey), rule => rule.IsAllowed);
 
-        private static bool ReadRule(IReadOnlyDictionary<string, bool> rules, string key) =>
-            rules.TryGetValue(key, out var allowed) && allowed;
-
-        private static List<AccessPermissionValueDto> ToCompleteMatrix(
-            IReadOnlyDictionary<string, bool> rules,
-            string roleName,
-            string departmentName) =>
+        private static List<AccessPermissionValueDto> CreateCompleteMatrix(bool allowed) =>
             AccessPermissionCatalog.Services
                 .SelectMany(service => AccessPermissionCatalog.Actions.Select(action => new AccessPermissionValueDto
                 {
                     ServiceKey = service.ServiceKey,
                     ActionKey = action,
-                    Allowed = rules.TryGetValue(Key(service.ServiceKey, action), out var allowed)
-                        ? allowed
-                        : false
+                    Allowed = allowed
                 }))
                 .ToList();
 
