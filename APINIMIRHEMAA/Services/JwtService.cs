@@ -5,22 +5,27 @@ using System.Text;
 
 namespace APINIMIRHEMAA.Services
 {
+    // Provides reusable application operations for jwt service workflows.
     public class JwtService
     {
+        // Injected or cached configuration dependency/state used by this class.
         private readonly IConfiguration _configuration;
 
+        // Initializes a new jwt service instance.
         public JwtService(IConfiguration configuration)
         {
             _configuration = configuration;
         }
 
+        // Generates the token.
         public string GenerateToken(
             int userId,
             string username,
             string role,
             string department,
             int departmentId,
-            string employeeName)
+            string employeeName,
+            string sessionId)
         {
             var claims = new List<Claim>
             {
@@ -52,6 +57,11 @@ namespace APINIMIRHEMAA.Services
                 new Claim(
                     "DepartmentId",
                     departmentId.ToString()
+                ),
+
+                new Claim(
+                    UserSessionService.SessionIdClaimType,
+                    sessionId
                 )
             };
 

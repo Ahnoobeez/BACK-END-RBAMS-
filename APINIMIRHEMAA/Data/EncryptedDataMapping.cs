@@ -7,8 +7,10 @@ using System.Globalization;
 
 namespace APINIMIRHEMAA.Data
 {
+    // Configures database access and entity mapping for encrypted data mapping data.
     internal static class EncryptedDataMapping
     {
+        // Registers encryption converters for the client fields stored in protected form.
         public static void ConfigureClients(ModelBuilder modelBuilder, EncryptionService encryptionService)
         {
             var client = modelBuilder.Entity<ClientEntity>();
@@ -32,6 +34,8 @@ namespace APINIMIRHEMAA.Data
                 .HasColumnType("nvarchar(max)");
         }
 
+        // Configures database access and entity mapping for fields data.
+        // Registers encryption converters for protected employee and local record fields.
         public static void ConfigureLocalRecords(ModelBuilder modelBuilder, EncryptionService encryptionService)
         {
             var employee = modelBuilder.Entity<Employee>();
@@ -55,6 +59,7 @@ namespace APINIMIRHEMAA.Data
 
             modelBuilder.Entity<UserSignature>(entity =>
             {
+                // Configures the entity mapping, keys, and database-generated values.
                 entity.ToTable("UserSignature");
                 entity.HasKey(signature => signature.User_ID);
                 entity.Property(signature => signature.SignatureData)
@@ -65,6 +70,7 @@ namespace APINIMIRHEMAA.Data
 
             modelBuilder.Entity<EmployeeProfilePhoto>(entity =>
             {
+                // Configures the entity mapping, keys, and database-generated values.
                 entity.Property(photo => photo.PhotoData)
                     .HasConversion(CreateByteArrayConverter(encryptionService))
                     .HasColumnType("varbinary(max)")
@@ -73,6 +79,7 @@ namespace APINIMIRHEMAA.Data
 
             modelBuilder.Entity<UserProfilePhoto>(entity =>
             {
+                // Configures the entity mapping, keys, and database-generated values.
                 entity.ToTable("UserProfilePhoto");
                 entity.HasKey(photo => photo.User_ID);
                 entity.Property(photo => photo.PhotoData)
@@ -82,6 +89,7 @@ namespace APINIMIRHEMAA.Data
             });
         }
 
+        // Configures the encrypted string.
         private static void ConfigureEncryptedString(
             PropertyBuilder<string?> property,
             EncryptionService encryptionService)
@@ -94,6 +102,7 @@ namespace APINIMIRHEMAA.Data
                 .HasAnnotation("MaxLength", null);
         }
 
+        // Creates the date converter.
         private static ValueConverter<DateOnly?, string?> CreateDateConverter(
             EncryptionService encryptionService)
         {
@@ -108,6 +117,7 @@ namespace APINIMIRHEMAA.Data
                         CultureInfo.InvariantCulture));
         }
 
+        // Creates the byte array converter.
         private static ValueConverter<byte[], byte[]> CreateByteArrayConverter(
             EncryptionService encryptionService)
         {

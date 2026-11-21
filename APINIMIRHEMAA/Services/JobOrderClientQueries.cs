@@ -4,13 +4,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace APINIMIRHEMAA.Services
 {
+    // Provides reusable application operations for job order client queries workflows.
     public static class JobOrderClientQueries
     {
+        // Adds client details to each job-order query result.
         public static async Task PopulateAsync(
             LocalDbContext db,
             List<JobOrder> jobOrders,
             CancellationToken cancellationToken = default)
         {
+            // Exit the current operation when `jobOrders.Count == 0` is true.
             if (jobOrders.Count == 0)
             {
                 return;
@@ -34,8 +37,10 @@ namespace APINIMIRHEMAA.Services
                 }
             ).ToDictionaryAsync(record => record.JobOrder_ID, cancellationToken);
 
+            // Process each `jobOrder` returned by the collection expression in the loop header.
             foreach (var jobOrder in jobOrders)
             {
+                // Enter this branch when `clientDetailsByJobOrderId.TryGetValue(jobOrder.JobOrder_ID, out var clientDetails)` is true.
                 if (clientDetailsByJobOrderId.TryGetValue(jobOrder.JobOrder_ID, out var clientDetails))
                 {
                     jobOrder.Client_Name = clientDetails.Client_Name;

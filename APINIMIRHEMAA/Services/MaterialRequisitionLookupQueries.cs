@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace APINIMIRHEMAA.Services
 {
+    // Provides the material details and balance shown in requisition inventory choices.
     public sealed record MaterialRequisitionInventoryOption(
         int Material_ID,
         string Item_Name,
@@ -12,6 +13,7 @@ namespace APINIMIRHEMAA.Services
         string Unit,
         int? Balance);
 
+    // Provides purchase receipt details used to select purchased material.
     public sealed record MaterialRequisitionPurchaseReceiptOption(
         int Purchased_ID,
         int Material_ID,
@@ -19,8 +21,10 @@ namespace APINIMIRHEMAA.Services
         string Supplier_Name,
         int Unit_price);
 
+    // Provides reusable application operations for material requisition lookup queries workflows.
     public static class MaterialRequisitionLookupQueries
     {
+        // Retrieves the inventory options.
         public static async Task<List<MaterialRequisitionInventoryOption>> GetInventoryOptionsAsync(
             LocalDbContext db,
             CancellationToken cancellationToken)
@@ -28,6 +32,7 @@ namespace APINIMIRHEMAA.Services
             var materials = await db.Materials
                 .IgnoreQueryFilters()
                 .AsNoTracking()
+                // Apply the ordering expression here before returning or materializing the results.
                 .OrderBy(material => material.Item_Name)
                 .ToListAsync(cancellationToken);
             var inventoryRecords = await db.Inventory
@@ -37,6 +42,7 @@ namespace APINIMIRHEMAA.Services
             var pendingRequests = await db.MaterialRequisition_Slip
                 .IgnoreQueryFilters()
                 .AsNoTracking()
+                // Apply this predicate in the database query before materializing results.
                 .Where(slip => slip.Status == null || slip.Status.Trim() == "" ||
                     slip.Status.Trim().ToUpper() == "PENDING")
                 .GroupBy(slip => slip.Material_ID)
@@ -49,6 +55,7 @@ namespace APINIMIRHEMAA.Services
             var pendingRequestsByMaterialId = pendingRequests
                 .ToDictionary(group => group.MaterialId, group => group.Quantity);
 
+            // Process each `inventory` returned by the collection expression in the loop header.
             foreach (var inventory in inventoryRecords)
             {
                 inventory.Request = pendingRequestsByMaterialId.TryGetValue(
@@ -76,6 +83,7 @@ namespace APINIMIRHEMAA.Services
                 .ToList();
         }
 
+        // Retrieves the purchase receipt options.
         public static async Task<List<MaterialRequisitionPurchaseReceiptOption>> GetPurchaseReceiptOptionsAsync(
             LocalDbContext db,
             int materialId,
@@ -84,14 +92,17 @@ namespace APINIMIRHEMAA.Services
             var linkedPurchaseIds = db.MaterialRequisition_Slip
                 .IgnoreQueryFilters()
                 .AsNoTracking()
+                // Apply this predicate in the database query before materializing results.
                 .Where(slip => slip.Purchased_ID.HasValue)
                 .Select(slip => slip.Purchased_ID.GetValueOrDefault());
 
             return await db.Purchased_Material
                 .IgnoreQueryFilters()
                 .AsNoTracking()
+                // Apply this predicate in the database query before materializing results.
                 .Where(purchase => purchase.Material_ID == materialId
                     && !linkedPurchaseIds.Contains(purchase.Purchased_ID))
+                // Apply the ordering expression here before returning or materializing the results.
                 .OrderByDescending(purchase => purchase.Purchased_ID)
                 .Select(purchase => new MaterialRequisitionPurchaseReceiptOption(
                     purchase.Purchased_ID,
