@@ -55,7 +55,7 @@ namespace APINIMIRHEMAA.Data
 
             modelBuilder.Entity<UserSignature>(entity =>
             {
-                entity.ToTable("UserSignatures");
+                entity.ToTable("UserSignature");
                 entity.HasKey(signature => signature.User_ID);
                 entity.Property(signature => signature.SignatureData)
                     .HasConversion(CreateByteArrayConverter(encryptionService))
@@ -73,7 +73,7 @@ namespace APINIMIRHEMAA.Data
 
             modelBuilder.Entity<UserProfilePhoto>(entity =>
             {
-                entity.ToTable("UserProfilePhotos");
+                entity.ToTable("UserProfilePhoto");
                 entity.HasKey(photo => photo.User_ID);
                 entity.Property(photo => photo.PhotoData)
                     .HasConversion(CreateByteArrayConverter(encryptionService))
