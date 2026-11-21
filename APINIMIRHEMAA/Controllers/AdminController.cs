@@ -1,4 +1,5 @@
 ﻿using APINIMIRHEMAA.Data;
+using APINIMIRHEMAA.DTO;
 using APINIMIRHEMAA.DTO.Admin;
 using APINIMIRHEMAA.DTO.AuditTrail;
 using APINIMIRHEMAA.Models;
@@ -19,28 +20,30 @@ namespace APINIMIRHEMAA.Controllers
     [Authorize(Policy = "admin")]
     [Route("api/[controller]")]
     [ApiController]
-    // Coordinates the admin controller API endpoints, including request handling and response generation.
+
     public class AdminController : ControllerBase
     {
-        // Injected or cached localdb dependency/state used by this class.
+
         private LocalDbContext _Localdb;
-        // Injected or cached clouddb dependency/state used by this class.
+
         private CloudDbContext _Clouddb;
-        // Injected or cached access permissions dependency/state used by this class.
+
         private readonly AccessPermissionService _accessPermissions;
-        // Encryption service used to protect sensitive persisted values.
+
         private readonly EncryptionService _encryptionService;
-        // Injected or cached user sessions dependency/state used by this class.
+        private readonly NotificationService _notificationService;
+
         private readonly UserSessionService _userSessions;
-        // Logger used to record this class’s operational events and failures.
+
         private readonly ILogger<AdminController> _logger;
 
-        // Initializes a new admin controller instance.
+
         public AdminController(
             LocalDbContext Localcontext,
             CloudDbContext Cloudcontext,
             AccessPermissionService accessPermissions,
             EncryptionService encryptionService,
+            NotificationService notificationService,
             UserSessionService userSessions,
             ILogger<AdminController> logger)
         {
@@ -48,11 +51,12 @@ namespace APINIMIRHEMAA.Controllers
             _Clouddb = Cloudcontext;
             _accessPermissions = accessPermissions;
             _encryptionService = encryptionService;
+            _notificationService = notificationService;
             _userSessions = userSessions;
             _logger = logger;
         }
 
-        // Sets the active state of employee-linked accounts and removes sessions when deactivating them.
+
         private async Task SetEmployeeAccountsActiveAsync(
             int employeeId,
             bool isActive,
@@ -60,30 +64,30 @@ namespace APINIMIRHEMAA.Controllers
         {
             var linkedAccounts = await _Localdb.Users
                 .IgnoreQueryFilters()
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(account => account.Employee_ID == employeeId)
                 .ToListAsync(cancellationToken);
-            // Process each `account` returned by the collection expression in the loop header.
+
             foreach (var account in linkedAccounts)
             {
                 account.IsActive = isActive;
             }
 
-            // Persist the pending entity changes to the database at this point.
+
             await _Localdb.SaveChangesAsync(cancellationToken);
-            // Enter this branch when `!isActive && linkedAccounts.Count > 0` is true.
+
             if (!isActive && linkedAccounts.Count > 0)
             {
                 var userIds = linkedAccounts.Select(account => account.User_ID).ToArray();
                 await _Localdb.UserSessions
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(session => userIds.Contains(session.User_ID))
-                    // Delete matching rows in the database without loading them into application memory.
+
                     .ExecuteDeleteAsync(cancellationToken);
             }
         }
 
-        /// <summary>Encrypts the existing employee client data.</summary>
+
         [Authorize(Roles = "Admin,Super Admin")]
         [HttpPost("EncryptExistingEmployeeClientData")]
         public async Task<IActionResult> EncryptExistingEmployeeClientData(
@@ -91,7 +95,7 @@ namespace APINIMIRHEMAA.Controllers
         {
             var employees = await EncryptEntitiesAsync(
                 _Localdb,
-                // Apply the ordering expression here before returning or materializing the results.
+
                 _Localdb.Employee.AsNoTracking().OrderBy(employee => employee.Employee_Id),
                 new[]
                 {
@@ -110,31 +114,31 @@ namespace APINIMIRHEMAA.Controllers
                 cancellationToken);
             var localClients = await EncryptEntitiesAsync(
                 _Localdb,
-                // Apply the ordering expression here before returning or materializing the results.
+
                 _Localdb.Clients.IgnoreQueryFilters().AsNoTracking().OrderBy(client => client.Client_ID),
                 ClientPrivateProperties,
                 cancellationToken);
             var signatures = await EncryptEntitiesAsync(
                 _Localdb,
-                // Apply the ordering expression here before returning or materializing the results.
+
                 _Localdb.UserSignatures.AsNoTracking().OrderBy(signature => signature.User_ID),
                 new[] { nameof(UserSignature.SignatureData) },
                 cancellationToken);
             var employeePhotos = await EncryptEntitiesAsync(
                 _Localdb,
-                // Apply the ordering expression here before returning or materializing the results.
+
                 _Localdb.EmployeeProfilePhotos.AsNoTracking().OrderBy(photo => photo.Employee_ID),
                 new[] { nameof(EmployeeProfilePhoto.PhotoData) },
                 cancellationToken);
             var userPhotos = await EncryptEntitiesAsync(
                 _Localdb,
-                // Apply the ordering expression here before returning or materializing the results.
+
                 _Localdb.UserProfilePhotos.AsNoTracking().OrderBy(photo => photo.User_ID),
                 new[] { nameof(UserProfilePhoto.PhotoData) },
                 cancellationToken);
             var cloudClients = await EncryptEntitiesAsync(
                 _Clouddb,
-                // Apply the ordering expression here before returning or materializing the results.
+
                 _Clouddb.Clients.IgnoreQueryFilters().AsNoTracking().OrderBy(client => client.Client_ID),
                 ClientPrivateProperties,
                 cancellationToken);
@@ -161,7 +165,7 @@ namespace APINIMIRHEMAA.Controllers
             nameof(ClientEntity.Price_Per_Square_Inch)
         };
 
-        // Performs the encrypt entities operation. Inputs: context (context); source (source); privateProperties (private properties); cancellationToken (cancellation token for the asynchronous operation). Returns int asynchronously.
+
         private static async Task<int> EncryptEntitiesAsync<TEntity>(
             DbContext context,
             IQueryable<TEntity> source,
@@ -173,31 +177,31 @@ namespace APINIMIRHEMAA.Controllers
             var processedCount = 0;
             var offset = 0;
 
-            // Repeat the body while `true` remains true.
+
             while (true)
             {
                 var batch = await source
                     .Skip(offset)
                     .Take(batchSize)
                     .ToListAsync(cancellationToken);
-                // Exit the current operation when `batch.Count == 0` is true.
+
                 if (batch.Count == 0)
                 {
                     return processedCount;
                 }
 
-                // Process each `entity` returned by the collection expression in the loop header.
+
                 foreach (var entity in batch)
                 {
                     var entry = context.Attach(entity);
-                    // Process each `property` returned by the collection expression in the loop header.
+
                     foreach (var property in privateProperties)
                     {
                         entry.Property(property).IsModified = true;
                     }
                 }
 
-                // Persist the pending entity changes to the database at this point.
+
                 await context.SaveChangesAsync(cancellationToken);
                 context.ChangeTracker.Clear();
                 processedCount += batch.Count;
@@ -205,7 +209,7 @@ namespace APINIMIRHEMAA.Controllers
             }
         }
 
-        /// <summary>Retrieves the company overview report.</summary>
+
         [Authorize(Roles = "Admin,Super Admin")]
         [HttpGet("CompanyOverviewReport")]
         public async Task<ActionResult<CompanyOverviewReportDto>> GetCompanyOverviewReport(
@@ -213,13 +217,13 @@ namespace APINIMIRHEMAA.Controllers
             [FromQuery] DateOnly? to,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `!from.HasValue || !to.HasValue` is true.
+
             if (!from.HasValue || !to.HasValue)
             {
                 return BadRequest(new { message = "Both from and to date bounds are required (yyyy-MM-dd)." });
             }
 
-            // Return HTTP 400 Bad Request when `from.Value > to.Value || to.Value == DateOnly.MaxValue` is true.
+
             if (from.Value > to.Value || to.Value == DateOnly.MaxValue)
             {
                 return BadRequest(new { message = "The date range is invalid." });
@@ -234,12 +238,12 @@ namespace APINIMIRHEMAA.Controllers
             var generatedAtUtc = DateTime.UtcNow;
 
             var quotations = _Localdb.Quotation.IgnoreQueryFilters().AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var quotationDates = quotations.Where(quotation =>
                 quotation.Start_Date >= startDate && quotation.Start_Date <= endDate);
             var quotationStatuses = await BuildCompanyReportSectionAsync(
                 quotationDates,
-                // Filter the query to rows satisfying `uotations.Where(_ => false), , quotation => (decimal?)quotation.Overall_Total, quotation => quotation.Status, cancellationToken` before materializing the results.
+
                 quotations.Where(_ => false),
                 "Quotation.Start_Date",
                 quotation => (decimal?)quotation.Overall_Total,
@@ -247,16 +251,16 @@ namespace APINIMIRHEMAA.Controllers
                 cancellationToken);
 
             var jobs = _Localdb.JobOrder.IgnoreQueryFilters().AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var jobsWithReportDate = jobs.Where(job =>
                 (job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date).HasValue);
-            // Apply this predicate in the database query before materializing results.
+
             var jobDates = jobsWithReportDate.Where(job =>
                 (job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date) >= startDate &&
                 (job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date) <= endDate);
             var jobStatuses = await BuildCompanyReportSectionAsync(
                 jobDates,
-                // Filter the query to rows satisfying `jobs.Where(job => !(job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date).HasValue), , null, job => job.Status, cancellationToken` before materializing the results.
+
                 jobs.Where(job => !(job.Date_Delivered ?? job.Target_Delivery ?? job.Installation_Date).HasValue),
                 "JobOrder.Date_Delivered ?? Target_Delivery ?? Installation_Date",
                 null,
@@ -264,12 +268,12 @@ namespace APINIMIRHEMAA.Controllers
                 cancellationToken);
 
             var purchasedMaterials = _Localdb.Purchased_Material.IgnoreQueryFilters().AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var purchaseDates = purchasedMaterials.Where(purchase =>
                 purchase.Date_Received_Item >= startDate && purchase.Date_Received_Item <= endDate);
             var purchasedMaterialSummary = await BuildCompanyReportSectionAsync(
                 purchaseDates,
-                // Filter the query to rows satisfying `Materials.Where(_ => false), , purchase => (decimal?)purchase.Amount, null, cancellationToken` before materializing the results.
+
                 purchasedMaterials.Where(_ => false),
                 "Purchased_Material.Date_Received_Item",
                 purchase => (decimal?)purchase.Amount,
@@ -277,12 +281,12 @@ namespace APINIMIRHEMAA.Controllers
                 cancellationToken);
 
             var invoices = _Localdb.ServiceInvoice.IgnoreQueryFilters().AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var invoiceDates = invoices.Where(invoice =>
                 invoice.Invoice_Date >= startDate && invoice.Invoice_Date <= endDate);
             var invoiceSummary = await BuildCompanyReportSectionAsync(
                 invoiceDates,
-                // Filter the query to rows satisfying `invoices.Where(_ => false), , null, invoice => invoice.Status, cancellationToken` before materializing the results.
+
                 invoices.Where(_ => false),
                 "ServiceInvoice.Invoice_Date",
                 null,
@@ -291,20 +295,20 @@ namespace APINIMIRHEMAA.Controllers
             var serviceInvoiceItems = _Localdb.ServiceInvoiceItems
                 .IgnoreQueryFilters()
                 .AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var invoicesWithAmounts = invoiceDates.Where(invoice =>
                 invoice.Amount.HasValue ||
                 serviceInvoiceItems.Any(item => item.ServiceInvoice_ID == invoice.ServiceInvoice_ID));
             invoiceSummary.AmountRecordCount = await invoicesWithAmounts.LongCountAsync(cancellationToken);
-            // Enter this branch when `invoiceSummary.AmountRecordCount > 0` is true.
+
             if (invoiceSummary.AmountRecordCount > 0)
             {
                 var headerAmountTotal = await invoiceDates
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(invoice => invoice.Amount.HasValue)
                     .SumAsync(invoice => invoice.Amount, cancellationToken);
                 var itemAmountTotal = await serviceInvoiceItems
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(item => invoiceDates.Any(invoice =>
                         invoice.ServiceInvoice_ID == item.ServiceInvoice_ID &&
                         !invoice.Amount.HasValue))
@@ -313,12 +317,12 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var payments = _Localdb.PaymentTransactions.IgnoreQueryFilters().AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var paymentDates = payments.Where(payment =>
                 payment.PaidAtUtc >= startUtc && payment.PaidAtUtc < endExclusiveUtc);
             var paymentSummary = await BuildCompanyReportSectionAsync(
                 paymentDates,
-                // Filter the query to rows satisfying `payments.Where(_ => false), , payment => (decimal?)payment.Amount, null, cancellationToken` before materializing the results.
+
                 payments.Where(_ => false),
                 "PaymentTransaction.PaidAtUtc",
                 payment => (decimal?)payment.Amount,
@@ -326,14 +330,14 @@ namespace APINIMIRHEMAA.Controllers
                 cancellationToken);
 
             var requisitions = _Localdb.MaterialRequisition_Slip.IgnoreQueryFilters().AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var requisitionDates = requisitions.Where(requisition =>
                 requisition.Date.HasValue &&
                 requisition.Date.Value >= startDate &&
                 requisition.Date.Value <= endDate);
             var requisitionSummary = await BuildCompanyReportSectionAsync(
                 requisitionDates,
-                // Filter the query to rows satisfying `uisitions.Where(requisition => !requisition.Date.HasValue), , requisition => requisition.Total_Cost.HasValue ? (decimal?)requisition.Total_Cost.Value : null, requisition => requisition.Status, cancellationToken` before materializing the results.
+
                 requisitions.Where(requisition => !requisition.Date.HasValue),
                 "MaterialRequisition_Slip.Date",
                 requisition => requisition.Total_Cost.HasValue
@@ -361,7 +365,7 @@ namespace APINIMIRHEMAA.Controllers
                 .Select(group => new { Status = group.Key, Count = group.LongCount() })
                 .ToListAsync(cancellationToken);
             var inventoryStatusCounts = new Dictionary<string, long>();
-            // Process each `statusGroup` returned by the collection expression in the loop header.
+
             foreach (var statusGroup in inventoryStatuses)
             {
                 AddCount(
@@ -371,12 +375,12 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var schedules = _Localdb.Installation_Schedule.IgnoreQueryFilters().AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var scheduleDates = schedules.Where(schedule =>
                 schedule.Date >= startDate && schedule.Date <= endDate);
             var scheduleSummary = await BuildCompanyReportSectionAsync(
                 scheduleDates,
-                // Filter the query to rows satisfying `schedules.Where(_ => false), , null, null, cancellationToken` before materializing the results.
+
                 schedules.Where(_ => false),
                 "Installation_Schedule.Date",
                 null,
@@ -384,14 +388,14 @@ namespace APINIMIRHEMAA.Controllers
                 cancellationToken);
 
             var installationReports = _Localdb.InstallationReport.IgnoreQueryFilters().AsNoTracking();
-            // Apply this predicate in the database query before materializing results.
+
             var installationReportDates = installationReports.Where(report =>
                 report.ReportDate.HasValue &&
                 report.ReportDate.Value >= startDate &&
                 report.ReportDate.Value <= endDate);
             var installationReportSummary = await BuildCompanyReportSectionAsync(
                 installationReportDates,
-                // Filter the query to rows satisfying `onReports.Where(report => !report.ReportDate.HasValue), , null, null, cancellationToken` before materializing the results.
+
                 installationReports.Where(report => !report.ReportDate.HasValue),
                 "Installation_Report.ReportDate",
                 null,
@@ -426,7 +430,7 @@ namespace APINIMIRHEMAA.Controllers
             });
         }
 
-        // Builds company report section. Inputs: dateBoundRecords (date bound records); undatedRecords (undated records); dateField (date field); amountSelector (amount selector); statusSelector (status selector); cancellationToken (cancellation token for the asynchronous operation). Returns CompanyReportSectionDto asynchronously.
+
         private static async Task<CompanyReportSectionDto> BuildCompanyReportSectionAsync<TEntity>(
             IQueryable<TEntity> dateBoundRecords,
             IQueryable<TEntity> undatedRecords,
@@ -443,7 +447,7 @@ namespace APINIMIRHEMAA.Controllers
                 HasStatusField = statusSelector != null
             };
 
-            // Enter this branch when `amountSelector != null && summary.RecordCount > 0` is true.
+
             if (amountSelector != null && summary.RecordCount > 0)
             {
                 summary.AmountTotal = await dateBoundRecords
@@ -459,14 +463,14 @@ namespace APINIMIRHEMAA.Controllers
                     cancellationToken);
             }
 
-            // Enter this branch when `statusSelector != null` is true.
+
             if (statusSelector != null)
             {
                 var statusGroups = await dateBoundRecords
                     .GroupBy(statusSelector)
                     .Select(group => new { Status = group.Key, Count = group.LongCount() })
                     .ToListAsync(cancellationToken);
-                // Process each `statusGroup` returned by the collection expression in the loop header.
+
                 foreach (var statusGroup in statusGroups)
                 {
                     AddCount(
@@ -479,56 +483,56 @@ namespace APINIMIRHEMAA.Controllers
             return summary;
         }
 
-        // Normalizes the report status for consistent use.
+
         private static string NormalizeReportStatus(string? status)
         {
             var value = (status ?? "").Trim().ToLowerInvariant();
-            // Exit the current operation when `value.Length == 0` is true.
+
             if (value.Length == 0)
                 return "unknown";
-            // Exit the current operation when `value.Contains() || value.Contains() || value.Contains()` is true.
+
             if (value.Contains("reject") || value.Contains("cancel") || value.Contains("declin"))
                 return "rejected";
-            // Exit the current operation when `value.Contains()` is true.
+
             if (value.Contains("block"))
                 return "blocked";
-            // Exit the current operation when `value.Contains()` is true.
+
             if (value.Contains("approve"))
                 return "approved";
-            // Exit the current operation when `value.Contains() || value.Contains() || value ==` is true.
+
             if (value.Contains("complete") || value.Contains("deliver") || value == "done")
                 return "completed";
-            // Exit the current operation when `value.Contains() || value.Contains() || value.Contains() || value.Contains() || value.Contains()` is true.
+
             if (value.Contains("progress") || value.Contains("ongoing") || value.Contains("active") ||
                 value.Contains("started") || value.Contains("onsite"))
                 return "inProgress";
-            // Exit the current operation when `value.Contains() || value.Contains() || value == || value.Contains()` is true.
+
             if (value.Contains("pending") || value.Contains("await") || value == "open" ||
                 value.Contains("submitted"))
                 return "pending";
             return "other";
         }
 
-        // Normalizes the inventory status for consistent use.
+
         private static string NormalizeInventoryStatus(string? status)
         {
             var value = (status ?? "").Trim().ToLowerInvariant();
-            // Exit the current operation when `value.Length == 0` is true.
+
             if (value.Length == 0)
                 return "unknown";
-            // Exit the current operation when `value.Contains() || value.Contains()` is true.
+
             if (value.Contains("restock") || value.Contains("low"))
                 return "lowOrRestock";
-            // Exit the current operation when `value.Contains() || value.Contains()` is true.
+
             if (value.Contains("out") || value.Contains("zero"))
                 return "outOfStock";
-            // Exit the current operation when `value.Contains() || value.Contains()` is true.
+
             if (value.Contains("stock") || value.Contains("available"))
                 return "inStock";
             return "other";
         }
 
-        // Adds the supplied amount to the count stored for the specified key.
+
         private static void AddCount(
             IDictionary<string, long> counts,
             string key,
@@ -538,15 +542,15 @@ namespace APINIMIRHEMAA.Controllers
             counts[key] = currentCount + count;
         }
 
-        /// <summary>Retrieves all local audit trail entries.</summary>
+
         [HttpGet("GetLocalAuditTrail")]
         public List<AuditTrailEntryDTO> GetAllLocalAuditTrail()
         {
             var records = _Localdb.AuditTrail
                 .AsNoTracking()
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .OrderByDescending(record => record.Date)
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .ThenByDescending(record => record.Time)
                 .ToList();
             var legacyLabels = ResolveLegacyAuditLabels(records);
@@ -558,7 +562,7 @@ namespace APINIMIRHEMAA.Controllers
             return ConsolidateAuditBatchEntries(entries);
         }
 
-        /// <summary>Retrieves the material requisition options.</summary>
+
         [HttpGet("GetMaterialRequisitionOptions")]
         public async Task<ActionResult<List<AdminMaterialRequisitionOption>>> GetMaterialRequisitionOptions(
             CancellationToken cancellationToken)
@@ -582,7 +586,7 @@ namespace APINIMIRHEMAA.Controllers
 
             var options = materials.Select(material =>
             {
-                // Calculates available and purchased quantities for each material option.
+
                 var purchasedAvailable = Math.Max(
                     (material.Purchased ?? 0) - (material.Request_Purchased ?? 0),
                     0);
@@ -604,14 +608,61 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(options);
         }
 
-        /// <summary>Retrieves the returned materials.</summary>
+        [HttpGet("GetMaterialRequisitionPurchaseReceipts")]
+        public async Task<ActionResult<List<MaterialRequisitionPurchaseReceiptOption>>> GetMaterialRequisitionPurchaseReceipts(
+            int materialId,
+            CancellationToken cancellationToken)
+        {
+            if (materialId <= 0)
+            {
+                return BadRequest("A valid material ID is required.");
+            }
+
+            var receipts = await MaterialRequisitionLookupQueries.GetPurchaseReceiptOptionsAsync(
+                _Localdb,
+                materialId,
+                cancellationToken);
+            return Ok(receipts);
+        }
+
+        [HttpPost("PreviewMaterialRequisition")]
+        public ActionResult PreviewAdminMaterialRequisition([FromBody] RequisitionPreviewDto dto)
+        {
+            var result = MaterialRequisitionWorkflowService.Preview(_Localdb, dto);
+            return result.Error != null ? BadRequest(result.Error) : Ok(result.Response);
+        }
+
+        [HttpPost("SubmitMaterialRequisitionBatch")]
+        public async Task<IActionResult> SubmitAdminMaterialRequisitionBatch(
+            [FromBody] List<MaterialRequesition_Slip> slips,
+            CancellationToken cancellationToken)
+        {
+            if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var adminUserId))
+            {
+                return Unauthorized("Your session is invalid. Please sign in again.");
+            }
+
+            var result = await MaterialRequisitionWorkflowService.SubmitBatchAsync(
+                _Localdb,
+                _notificationService,
+                slips,
+                adminUserId,
+                null,
+                cancellationToken,
+                autoApprove: true);
+            return result.Error != null
+                ? BadRequest(result.Error)
+                : Ok(new { saved = result.Saved, approved = result.Saved });
+        }
+
+
         [HttpGet("GetReturnedMaterials")]
         public async Task<ActionResult<List<MaterialRequesition_Slip>>> GetReturnedMaterials(
             CancellationToken cancellationToken)
         {
             var records = await _Localdb.MaterialRequisition_Slip
                 .AsNoTracking()
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(slip =>
                     slip.FromWho != null &&
                     (slip.FromWho.Trim().ToUpper() == "ADMIN" ||
@@ -619,21 +670,21 @@ namespace APINIMIRHEMAA.Controllers
                      slip.FromWho.Trim().ToUpper() == "INVENTORY") &&
                     slip.ToWho.Trim().ToUpper() == "SUPPLIER" &&
                     slip.Status != null && slip.Status.Trim().ToUpper() == "APPROVED")
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .OrderByDescending(slip => slip.Date)
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .ThenByDescending(slip => slip.MR_ID)
                 .ToListAsync(cancellationToken);
             return Ok(records);
         }
 
-        /// <summary>Adds the material requisition batch.</summary>
+
         [HttpPost("AddMaterialRequisitionBatch")]
         public async Task<IActionResult> AddMaterialRequisitionBatch(
             [FromBody] List<AdminMaterialRequisitionRequest> requests,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `requests == null || requests.Count == 0` is true.
+
             if (requests == null || requests.Count == 0)
             {
                 return BadRequest("Add at least one material before submitting.");
@@ -662,11 +713,11 @@ namespace APINIMIRHEMAA.Controllers
 
             var materialIds = requests.Select(request => request.Material_ID).Distinct().ToList();
             var materials = await _Localdb.Materials
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(material => materialIds.Contains(material.Material_ID))
                 .ToDictionaryAsync(material => material.Material_ID, cancellationToken);
             var inventories = await _Localdb.Inventory
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(inventory => materialIds.Contains(inventory.Material_ID))
                 .ToDictionaryAsync(inventory => inventory.Material_ID, cancellationToken);
             var pendingDemandByMaterial = new Dictionary<int, int>();
@@ -674,31 +725,31 @@ namespace APINIMIRHEMAA.Controllers
             var submitter = User.FindFirstValue(ClaimTypes.Name);
             var today = DateOnly.FromDateTime(DateTime.Now);
 
-            // Repeat the body while `the loop condition` remains true.
+
             for (var index = 0; index < requests.Count; index++)
             {
                 var request = requests[index];
                 var label = $"Row {index + 1}";
-                // Return HTTP 400 Bad Request when `string.IsNullOrWhiteSpace(request.Control_Number)` is true.
+
                 if (string.IsNullOrWhiteSpace(request.Control_Number))
                     return BadRequest($"{label}: control number is required.");
-                // Return HTTP 400 Bad Request when `!materials.TryGetValue(request.Material_ID, out var material) || !inventories.TryGetValue(request.Material_ID, out var inventory)` is true.
+
                 if (!materials.TryGetValue(request.Material_ID, out var material) ||
                     !inventories.TryGetValue(request.Material_ID, out var inventory))
                     return BadRequest($"{label}: choose a material with a Warehouse inventory record.");
-                // Return HTTP 400 Bad Request when `request.Quantity <= 0` is true.
+
                 if (request.Quantity <= 0)
                     return BadRequest($"{label}: quantity must be greater than zero.");
-                // Return HTTP 400 Bad Request when `request.Unit_Cost < 0 || (long)request.Quantity * request.Unit_Cost > int.MaxValue` is true.
+
                 if (request.Unit_Cost < 0 ||
                     (long)request.Quantity * request.Unit_Cost > int.MaxValue)
                     return BadRequest($"{label}: unit cost or total cost exceeds the supported limit.");
 
-                // Enter this branch when `!pendingDemandByMaterial.ContainsKey(request.Material_ID)` is true.
+
                 if (!pendingDemandByMaterial.ContainsKey(request.Material_ID))
                 {
                     pendingDemandByMaterial[request.Material_ID] = await _Localdb.MaterialRequisition_Slip
-                        // Apply this predicate in the database query before materializing results.
+
                         .Where(slip => slip.Material_ID == request.Material_ID &&
                             (slip.Status == null || slip.Status.Trim() == "" ||
                              slip.Status.Trim().ToUpper() == "PENDING"))
@@ -732,23 +783,23 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             _Localdb.MaterialRequisition_Slip.AddRange(slips);
-            // Persist the pending entity changes to the database at this point.
+
             await _Localdb.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return Ok(new { saved = slips.Count });
         }
 
-        /// <summary>Retrieves the local audit trail by id.</summary>
+
         [HttpGet("GetLocalAuditTrailByID")]
         public ActionResult<AuditTrailEntryDTO> GetLocalAuditTrailByID(int id)
         {
-            // Return HTTP 400 Bad Request when `id == 0` is true.
+
             if (id == 0)
             {
                 return BadRequest("Invalid Audit Trail ID.");
             }
             var auditTrail = _Localdb.AuditTrail.FirstOrDefault(x => x.AuditTrail_ID == id);
-            // Return HTTP 404 Not Found when `auditTrail == null` is true.
+
             if (auditTrail == null)
             {
                 return NotFound();
@@ -758,7 +809,7 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(MapAuditTrailEntry(auditTrail, legacyLabel));
         }
 
-        // Resolves the legacy audit labels.
+
         private Dictionary<int, string> ResolveLegacyAuditLabels(
             IReadOnlyCollection<AuditTrail> records)
         {
@@ -768,7 +819,7 @@ namespace APINIMIRHEMAA.Controllers
                     record.AuditTrail_ID,
                     Reference = ParseLegacyAuditReference(record.Action)
                 })
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(item => item.Reference != null)
                 .Select(item => new
                 {
@@ -779,25 +830,25 @@ namespace APINIMIRHEMAA.Controllers
                 .ToList();
 
             var quotationIds = references
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(item => item.Entity == nameof(Quotation))
                 .Select(item => item.Id)
                 .Distinct()
                 .ToList();
             var storeIds = references
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(item => item.Entity == nameof(Quotation_Store))
                 .Select(item => item.Id)
                 .Distinct()
                 .ToList();
             var itemIds = references
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(item => item.Entity == nameof(Quotation_Items))
                 .Select(item => item.Id)
                 .Distinct()
                 .ToList();
             var materialIds = references
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(item => item.Entity == nameof(QuotationItemMaterial))
                 .Select(item => item.Id)
                 .Distinct()
@@ -806,7 +857,7 @@ namespace APINIMIRHEMAA.Controllers
             var materialsById = materialIds.Count == 0
                 ? new Dictionary<int, QuotationItemMaterial>()
                 : _Localdb.QuotationItemMaterials.AsNoTracking()
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(item => materialIds.Contains(item.QuotationItemMaterial_ID))
                     .ToDictionary(item => item.QuotationItemMaterial_ID);
             var relatedItemIds = itemIds
@@ -816,13 +867,13 @@ namespace APINIMIRHEMAA.Controllers
             var itemsById = relatedItemIds.Count == 0
                 ? new Dictionary<int, Quotation_Items>()
                 : _Localdb.Quotation_Items.AsNoTracking()
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(item => relatedItemIds.Contains(item.QI_ID))
                     .ToDictionary(item => item.QI_ID);
             var relatedStoreIds = storeIds
                 .Concat(itemsById.Values.Select(item => item.QS_ID))
                 .Concat(materialsById.Values
-                    // Filter the query to rows satisfying `.Where(material => itemsById.ContainsKey(material.QI_ID)) .Select(material => itemsById[material.QI_ID].QS_ID)` before materializing the results.
+
                     .Where(material => itemsById.ContainsKey(material.QI_ID))
                     .Select(material => itemsById[material.QI_ID].QS_ID))
                 .Distinct()
@@ -830,7 +881,7 @@ namespace APINIMIRHEMAA.Controllers
             var storesById = relatedStoreIds.Count == 0
                 ? new Dictionary<int, Quotation_Store>()
                 : _Localdb.Quotation_Store.AsNoTracking()
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(store => relatedStoreIds.Contains(store.QS_ID))
                     .ToDictionary(store => store.QS_ID);
             quotationIds.AddRange(storesById.Values.Select(store => store.Quotation_ID));
@@ -839,7 +890,7 @@ namespace APINIMIRHEMAA.Controllers
             var quotationsById = quotationIds.Count == 0
                 ? new Dictionary<int, Quotation>()
                 : _Localdb.Quotation.AsNoTracking()
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(quotation => quotationIds.Contains(quotation.Quotation_ID))
                     .ToDictionary(quotation => quotation.Quotation_ID);
             var clientIds = quotationsById.Values
@@ -849,12 +900,12 @@ namespace APINIMIRHEMAA.Controllers
             var clientsById = clientIds.Count == 0
                 ? new Dictionary<int, ClientEntity>()
                 : _Localdb.Clients.AsNoTracking()
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(client => clientIds.Contains(client.Client_ID))
                     .ToDictionary(client => client.Client_ID);
 
             var labels = new Dictionary<int, string>();
-            // Process each `reference` returned by the collection expression in the loop header.
+
             foreach (var reference in references)
             {
                 var quotationId = reference.Entity switch
@@ -870,7 +921,7 @@ namespace APINIMIRHEMAA.Controllers
                         => materialStore.Quotation_ID,
                     _ => (int?)null
                 };
-                // Skip this item and continue when `quotationId is not int id || !quotationsById.TryGetValue(id, out var quotation)` is true.
+
                 if (quotationId is not int id ||
                     !quotationsById.TryGetValue(id, out var quotation))
                 {
@@ -886,10 +937,10 @@ namespace APINIMIRHEMAA.Controllers
                         DecryptProtectedSubject(quotation.Client_Subject),
                         quotation.Title
                     }
-                    // Filter the query to rows satisfying `.Where(value => !string.IsNullOrWhiteSpace(value)) .Select(value => value!.Trim())` before materializing the results.
+
                     .Where(value => !string.IsNullOrWhiteSpace(value))
                     .Select(value => value!.Trim()));
-                // Enter this branch when `!string.IsNullOrWhiteSpace(label)` is true.
+
                 if (!string.IsNullOrWhiteSpace(label))
                 {
                     labels[reference.AuditTrail_ID] = label;
@@ -899,10 +950,10 @@ namespace APINIMIRHEMAA.Controllers
             return labels;
         }
 
-        // Performs the parse legacy audit reference operation. Inputs: action (action). Returns (string Entity, int Id)?.
+
         private static (string Entity, int Id)? ParseLegacyAuditReference(string? action)
         {
-            // Exit the current operation when `string.IsNullOrWhiteSpace(action)` is true.
+
             if (string.IsNullOrWhiteSpace(action))
             {
                 return null;
@@ -916,7 +967,7 @@ namespace APINIMIRHEMAA.Controllers
                 : null;
         }
 
-        // Maps the audit trail entry to its corresponding representation.
+
         private AuditTrailEntryDTO MapAuditTrailEntry(
             AuditTrail record,
             string? legacyDocumentLabel)
@@ -924,7 +975,7 @@ namespace APINIMIRHEMAA.Controllers
             const string detailsPrefix = "AUDIT_DETAILS_V1:";
             AuditTrailDetailsDTO? details = null;
             var storedAction = record.Action ?? "";
-            // Enter this branch when `storedAction.StartsWith(detailsPrefix, StringComparison.Ordinal)` is true.
+
             if (storedAction.StartsWith(detailsPrefix, StringComparison.Ordinal))
             {
                 try
@@ -932,7 +983,7 @@ namespace APINIMIRHEMAA.Controllers
                     details = JsonSerializer.Deserialize<AuditTrailDetailsDTO>(
                         storedAction[detailsPrefix.Length..]);
                 }
-                // Handle `JsonException exception` raised by the preceding operation.
+
                 catch (JsonException exception)
                 {
                     Console.Error.WriteLine(
@@ -940,7 +991,7 @@ namespace APINIMIRHEMAA.Controllers
                 }
             }
 
-            // Enter this branch when `details != null` is true.
+
             if (details != null)
             {
                 details.DocumentLabel = DecryptProtectedSegments(details.DocumentLabel);
@@ -978,14 +1029,14 @@ namespace APINIMIRHEMAA.Controllers
             };
         }
 
-        // Combines audit entries from the same batch into a single display entry.
+
         private static List<AuditTrailEntryDTO> ConsolidateAuditBatchEntries(
             List<AuditTrailEntryDTO> entries)
         {
             var consolidated = new List<AuditTrailEntryDTO>();
-            // Process each `group` returned by the collection expression in the loop header.
+
             foreach (var group in entries
-                         // Filter the query to rows satisfying `.Where(entry => !string.IsNullOrWhiteSpace(entry.Details?.BatchId)) .GroupBy(entry => new { entry.Details!.BatchId, entry.Name, entry.Department })` before materializing the results.
+
                          .Where(entry => !string.IsNullOrWhiteSpace(entry.Details?.BatchId))
                          .GroupBy(entry => new
                          {
@@ -995,7 +1046,7 @@ namespace APINIMIRHEMAA.Controllers
                          }))
             {
                 var batch = group.ToList();
-                // Enter this branch when `batch.Count == 1` is true.
+
                 if (batch.Count == 1)
                 {
                     consolidated.Add(batch[0]);
@@ -1008,7 +1059,7 @@ namespace APINIMIRHEMAA.Controllers
                 var formName = ResolveAuditFormName(auditRecords.Select(record => record.Entity));
                 var rootEntity = ResolveAuditRootEntity(formName);
                 var rootRecords = auditRecords
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(record =>
                         string.Equals(record.Entity, rootEntity, StringComparison.OrdinalIgnoreCase))
                     .ToList();
@@ -1035,7 +1086,7 @@ namespace APINIMIRHEMAA.Controllers
                     "Deleted" => "has been deleted",
                     _ => "has been updated"
                 };
-                // Enter this branch when `replacementQuotation` is true.
+
                 if (replacementQuotation)
                 {
                     actionDescription = "has been rejected and a new quotation has been created";
@@ -1062,9 +1113,9 @@ namespace APINIMIRHEMAA.Controllers
                     FormRecords = auditRecords
                 };
                 var firstEntry = batch
-                    // Apply the ordering expression here before returning or materializing the results.
+
                     .OrderBy(entry => entry.Date)
-                    // Apply the ordering expression here before returning or materializing the results.
+
                     .ThenBy(entry => entry.Time)
                     .First();
                 consolidated.Add(new AuditTrailEntryDTO
@@ -1080,21 +1131,21 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var batchedIds = entries
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.Details?.BatchId))
                 .Select(entry => entry.AuditTrail_ID)
                 .ToHashSet();
-            // Filter the query to rows satisfying `tries.Where(entry => !batchedIds.Contains(entry.AuditTrail_ID))` before materializing the results.
+
             consolidated.AddRange(entries.Where(entry => !batchedIds.Contains(entry.AuditTrail_ID)));
             return consolidated
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .OrderByDescending(entry => entry.Date)
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .ThenByDescending(entry => entry.Time)
                 .ToList();
         }
 
-        // Resolves the audit root entity.
+
         private static string ResolveAuditRootEntity(string formName) =>
             formName switch
             {
@@ -1112,21 +1163,21 @@ namespace APINIMIRHEMAA.Controllers
                 _ => formName
             };
 
-        // Resolves the audit form name.
+
         private static string ResolveAuditFormName(IEnumerable<string> entities)
         {
             var names = entities.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            // Exit the current operation when `names.Contains(nameof(PurchaseOrder))` is true.
+
             if (names.Contains(nameof(PurchaseOrder)))
             {
                 return "Purchase Order";
             }
-            // Exit the current operation when `names.Contains(nameof(Conforme))` is true.
+
             if (names.Contains(nameof(Conforme)))
             {
                 return "Conforme";
             }
-            // Exit the current operation when `names.Contains(nameof(Quotation)) || names.Contains(nameof(Quotation_Store)) || names.Contains(nameof(Quotation_Items)) || names.Contains(nameof(QuotationItemMaterial))` is true.
+
             if (names.Contains(nameof(Quotation)) ||
                 names.Contains(nameof(Quotation_Store)) ||
                 names.Contains(nameof(Quotation_Items)) ||
@@ -1134,47 +1185,47 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return "Quotation";
             }
-            // Exit the current operation when `names.Contains(nameof(JobOrder)) || names.Contains(nameof(JobOrderItems))` is true.
+
             if (names.Contains(nameof(JobOrder)) || names.Contains(nameof(JobOrderItems)))
             {
                 return "Job Order";
             }
-            // Exit the current operation when `names.Contains(nameof(DeliveryReceipt)) || names.Contains(nameof(DeliveryReceiptItems)) || names.Contains(nameof(DeliveryFiles))` is true.
+
             if (names.Contains(nameof(DeliveryReceipt)) ||
                 names.Contains(nameof(DeliveryReceiptItems)) ||
                 names.Contains(nameof(DeliveryFiles)))
             {
                 return "Delivery Receipt";
             }
-            // Exit the current operation when `names.Contains(nameof(ServiceInvoice)) || names.Contains(nameof(ServiceInvoiceItem)) || names.Contains(nameof(ServiceInvoiceFile))` is true.
+
             if (names.Contains(nameof(ServiceInvoice)) ||
                 names.Contains(nameof(ServiceInvoiceItem)) ||
                 names.Contains(nameof(ServiceInvoiceFile)))
             {
                 return "Service Invoice";
             }
-            // Exit the current operation when `names.Contains(nameof(Installation_Schedule)) || names.Contains(nameof(InstallationScheduleEmployee))` is true.
+
             if (names.Contains(nameof(Installation_Schedule)) ||
                 names.Contains(nameof(InstallationScheduleEmployee)))
             {
                 return "Installation Schedule";
             }
-            // Exit the current operation when `names.Contains(nameof(CollectionReceipt))` is true.
+
             if (names.Contains(nameof(CollectionReceipt)))
             {
                 return "Collection Receipt";
             }
-            // Exit the current operation when `names.Contains(nameof(InstallationReport))` is true.
+
             if (names.Contains(nameof(InstallationReport)))
             {
                 return "Installation Report";
             }
-            // Exit the current operation when `names.Contains(nameof(MaterialRequesition_Slip))` is true.
+
             if (names.Contains(nameof(MaterialRequesition_Slip)))
             {
                 return "Material Requisition";
             }
-            // Exit the current operation when `names.Contains(nameof(StockTransfer_Slip))` is true.
+
             if (names.Contains(nameof(StockTransfer_Slip)))
             {
                 return "Stock Transfer";
@@ -1183,19 +1234,19 @@ namespace APINIMIRHEMAA.Controllers
             return FormatAuditEntityName(names.FirstOrDefault() ?? "Form");
         }
 
-        // Decrypts the protected values.
+
         private void DecryptProtectedValues(Dictionary<string, string?>? values)
         {
-            // Exit the current operation when `values == null` is true.
+
             if (values == null)
             {
                 return;
             }
 
-            // Process each `key` returned by the collection expression in the loop header.
+
             foreach (var key in values.Keys.ToList())
             {
-                // Enter this branch when `values[key] is { } value` is true.
+
                 if (values[key] is { } value)
                 {
                     values[key] = DecryptProtectedSegments(value);
@@ -1203,15 +1254,15 @@ namespace APINIMIRHEMAA.Controllers
             }
         }
 
-        // Decrypts the protected segments.
+
         private string DecryptProtectedSegments(string value) =>
             Regex.Replace(value, @"CfDJ8[A-Za-z0-9_-]+={0,2}", match =>
                 DecryptProtectedSubject(match.Value));
 
-        // Decrypts the protected subject.
+
         private string DecryptProtectedSubject(string? value)
         {
-            // Exit the current operation when `string.IsNullOrEmpty(value) || !value.StartsWith(, StringComparison.Ordinal)` is true.
+
             if (string.IsNullOrEmpty(value) ||
                 !value.StartsWith("CfDJ8", StringComparison.Ordinal))
             {
@@ -1221,13 +1272,13 @@ namespace APINIMIRHEMAA.Controllers
             return _encryptionService.TryDecrypt(value);
         }
 
-        // Converts a legacy audit action into its current display label.
+
         private static string FormatLegacyAuditAction(string action, string? documentLabel)
         {
             var match = Regex.Match(
                 action,
                 @"^(?<entity>[A-Za-z0-9_]+)#\s*\d+\s*(?<description>.*)$");
-            // Exit the current operation when `!match.Success` is true.
+
             if (!match.Success)
             {
                 return action;
@@ -1239,11 +1290,11 @@ namespace APINIMIRHEMAA.Controllers
                 match.Groups["description"].Value);
         }
 
-        // Converts an audit action code into a readable display label.
+
         private static string FormatAuditAction(AuditTrailDetailsDTO details)
         {
             var description = details.ActionDescription;
-            // Enter this branch when `string.IsNullOrWhiteSpace(description)` is true.
+
             if (string.IsNullOrWhiteSpace(description))
             {
                 description = details.Operation switch
@@ -1260,21 +1311,21 @@ namespace APINIMIRHEMAA.Controllers
                 description);
         }
 
-        // Coordinates the and API endpoints, including request handling and response generation.
-        // Builds the display action from the audit record and its related changes.
+
+
         private static string ComposeAuditAction(
             string formName,
             string? documentLabel,
             string? description)
         {
             var parts = new List<string> { formName };
-            // Enter this branch when `!string.IsNullOrWhiteSpace(documentLabel) && !documentLabel.Equals(formName, StringComparison.OrdinalIgnoreCase)` is true.
+
             if (!string.IsNullOrWhiteSpace(documentLabel) &&
                 !documentLabel.Equals(formName, StringComparison.OrdinalIgnoreCase))
             {
                 parts.Add(documentLabel);
             }
-            // Enter this branch when `!string.IsNullOrWhiteSpace(description)` is true.
+
             if (!string.IsNullOrWhiteSpace(description))
             {
                 parts.Add(description);
@@ -1283,7 +1334,7 @@ namespace APINIMIRHEMAA.Controllers
             return string.Join(" - ", parts);
         }
 
-        // Converts an entity name into a readable audit label.
+
         private static string FormatAuditEntityName(string entityName) =>
             string.Concat(entityName.Select((character, index) =>
                 index > 0 && char.IsUpper(character) &&
@@ -1293,51 +1344,51 @@ namespace APINIMIRHEMAA.Controllers
                 .Replace('_', ' ')
                 .Trim();
 
-        /// <summary>Adds the local audit trail.</summary>
+
         [HttpPost("AddLocalAuditTrail")]
         public ActionResult<AuditTrail> AddLocalAuditTrail(AuditTrail auditTrail)
         {
-            // Return HTTP 400 Bad Request when `!ModelState.IsValid` is true.
+
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
             _Localdb.Add(auditTrail);
-            // Persist the pending entity changes to the database at this point.
+
             _Localdb.SaveChanges();
             return Ok(auditTrail);
         }
 
 
-        /// <summary>Retrieves all employees from the local database.</summary>
+
         [HttpGet("GetLocalEmployees")]
         public List<Employee> GetAllLocalEmployee()
         {
             return _Localdb.Employee.ToList();
         }
 
-        /// <summary>Retrieves the archived local employees.</summary>
+
         [HttpGet("GetArchivedLocalEmployees")]
         public async Task<ActionResult<List<Employee>>> GetArchivedLocalEmployees(
             CancellationToken cancellationToken)
         {
             var employees = await _Localdb.Employee
                 .AsNoTracking()
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(employee => employee.IsArchived)
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .OrderBy(employee => employee.Employee_Id)
                 .ToListAsync(cancellationToken);
             return Ok(employees);
         }
 
-        /// <summary>Archives the employee and deactivates linked user accounts.</summary>
+
         [HttpPut("ArchiveLocalEmployee")]
         public async Task<ActionResult<Employee>> ArchiveLocalEmployee(
             [FromQuery] int employeeId,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `employeeId <= 0` is true.
+
             if (employeeId <= 0)
             {
                 return BadRequest(new { message = "A valid employee ID is required." });
@@ -1349,17 +1400,17 @@ namespace APINIMIRHEMAA.Controllers
             var employee = await _Localdb.Employee.FirstOrDefaultAsync(
                 record => record.Employee_Id == employeeId,
                 cancellationToken);
-            // Return HTTP 404 Not Found when `employee == null` is true.
+
             if (employee == null)
             {
                 return NotFound(new { message = "The employee could not be found." });
             }
-            // Return HTTP 400 Bad Request when `!employee.Date_Resigned.HasValue` is true.
+
             if (!employee.Date_Resigned.HasValue)
             {
                 return BadRequest(new { message = "Only employees with a resignation date can be archived." });
             }
-            // Return HTTP 409 Conflict when `employee.IsArchived` is true.
+
             if (employee.IsArchived)
             {
                 return Conflict(new { message = "This employee is already archived." });
@@ -1371,13 +1422,13 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(employee);
         }
 
-        /// <summary>Restores an archived employee and reactivates linked user accounts.</summary>
+
         [HttpPut("RestoreLocalEmployee")]
         public async Task<ActionResult<Employee>> RestoreLocalEmployee(
             [FromQuery] int employeeId,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `employeeId <= 0` is true.
+
             if (employeeId <= 0)
             {
                 return BadRequest(new { message = "A valid employee ID is required." });
@@ -1389,12 +1440,12 @@ namespace APINIMIRHEMAA.Controllers
             var employee = await _Localdb.Employee.FirstOrDefaultAsync(
                 record => record.Employee_Id == employeeId,
                 cancellationToken);
-            // Return HTTP 404 Not Found when `employee == null` is true.
+
             if (employee == null)
             {
                 return NotFound(new { message = "The employee could not be found." });
             }
-            // Return HTTP 409 Conflict when `!employee.IsArchived` is true.
+
             if (!employee.IsArchived)
             {
                 return Conflict(new { message = "This employee is not archived." });
@@ -1403,37 +1454,37 @@ namespace APINIMIRHEMAA.Controllers
             employee.IsArchived = false;
             employee.Date_Resigned = null;
             await SetEmployeeAccountsActiveAsync(employeeId, true, cancellationToken);
-            // Persist the pending entity changes to the database at this point.
+
             await _Localdb.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return Ok(employee);
         }
 
-        /// <summary>Adds the local employee.</summary>
+
         [HttpPost("AddLocalEmployee")]
         public async Task<ActionResult<Employee>> AddLocalEmployee(
             [FromBody] Employee? employee,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `employee == null` is true.
+
             if (employee == null)
             {
                 return BadRequest(new { message = "Employee details are required." });
             }
 
-            // Return HTTP 400 Bad Request when `!ModelState.IsValid` is true.
+
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
             }
 
-            // Return HTTP 400 Bad Request when `employee.Employee_Id < 0` is true.
+
             if (employee.Employee_Id < 0)
             {
                 return BadRequest(new { message = "Employee ID cannot be negative." });
             }
 
-            // Return HTTP 400 Bad Request when `string.IsNullOrWhiteSpace(employee.FirstName) || string.IsNullOrWhiteSpace(employee.LastName) || string.IsNullOrWhiteSpace(employee.status)` is true.
+
             if (string.IsNullOrWhiteSpace(employee.FirstName) ||
                 string.IsNullOrWhiteSpace(employee.LastName) ||
                 string.IsNullOrWhiteSpace(employee.status))
@@ -1442,7 +1493,7 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             const string employeeNamePattern = @"^[\p{L}\p{M} ]+$";
-            // Return HTTP 400 Bad Request when `!Regex.IsMatch(employee.FirstName.Trim(), employeeNamePattern) || !Regex.IsMatch(employee.LastName.Trim(), employeeNamePattern) || (!string.IsNullOrWhiteSpace(employee.MiddleName) && !Regex.IsMatch(employee.MiddleName.Trim(), employeeNamePattern))` is true.
+
             if (!Regex.IsMatch(employee.FirstName.Trim(), employeeNamePattern) ||
                 !Regex.IsMatch(employee.LastName.Trim(), employeeNamePattern) ||
                 (!string.IsNullOrWhiteSpace(employee.MiddleName) &&
@@ -1451,7 +1502,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(new { message = "Employee names may contain letters and spaces only." });
             }
 
-            // Return HTTP 400 Bad Request when `!string.IsNullOrWhiteSpace(employee.ContactNumber) && !Regex.IsMatch(employee.ContactNumber.Trim(), @)` is true.
+
             if (!string.IsNullOrWhiteSpace(employee.ContactNumber) &&
                 !Regex.IsMatch(employee.ContactNumber.Trim(), @"^[0-9]{11}$"))
             {
@@ -1463,7 +1514,7 @@ namespace APINIMIRHEMAA.Controllers
                     record => record.Department_ID == employee.Department_ID.Value,
                     cancellationToken)
                 : null;
-            // Return HTTP 400 Bad Request when `department == null` is true.
+
             if (department == null)
             {
                 return BadRequest(new { message = "Select a valid department." });
@@ -1474,12 +1525,12 @@ namespace APINIMIRHEMAA.Controllers
                     record => record.Role_ID == employee.Role_ID.Value,
                     cancellationToken)
                 : null;
-            // Return HTTP 400 Bad Request when `role == null` is true.
+
             if (role == null)
             {
                 return BadRequest(new { message = "Select a valid role." });
             }
-            // Return HTTP 400 Bad Request when `ModuleAccess.IsAdministratorRole(role.Role_Name) && !string.Equals( department.Department_Name.Trim(), , StringComparison.OrdinalIgnoreCase)` is true.
+
             if (ModuleAccess.IsAdministratorRole(role.Role_Name) &&
                 !string.Equals(
                     department.Department_Name.Trim(),
@@ -1495,14 +1546,14 @@ namespace APINIMIRHEMAA.Controllers
             await using var transaction = await _Localdb.Database.BeginTransactionAsync(
                 IsolationLevel.Serializable,
                 cancellationToken);
-            // Enter this branch when `employee.Employee_Id == 0` is true.
+
             if (employee.Employee_Id == 0)
             {
                 var lastEmployeeId = await _Localdb.Employee
                     .MaxAsync(record => (int?)record.Employee_Id, cancellationToken) ?? 0;
                 employee.Employee_Id = checked(lastEmployeeId + 1);
             }
-            // Return HTTP 409 Conflict when `await _Localdb.Employee.AnyAsync( record => record.Employee_Id == employee.Employee_Id, cancellationToken)` is true.
+
             else if (await _Localdb.Employee.AnyAsync(
                          record => record.Employee_Id == employee.Employee_Id,
                          cancellationToken))
@@ -1531,35 +1582,35 @@ namespace APINIMIRHEMAA.Controllers
             employee.Date_Resigned = null;
 
             _Localdb.Employee.Add(employee);
-            // Persist the pending entity changes to the database at this point.
+
             await _Localdb.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return Ok(employee);
         }
 
-        /// <summary>Updates the local employee.</summary>
+
         [HttpPut("UpdateLocalEmployee")]
         public async Task<ActionResult<Employee>> UpdateLocalEmployee(
             [FromBody] Employee? employee,
             CancellationToken cancellationToken)
         {
-            // Enter this branch when `employee == null || employee.Employee_Id <= 0` is true.
+
             if (employee == null || employee.Employee_Id <= 0)
             {
-                // Coordinates the is API endpoints, including request handling and response generation.
+
                 return BadRequest(new { message = "A valid employee record is required." });
             }
 
             var existingEmployee = await _Localdb.Employee.FirstOrDefaultAsync(
                 record => record.Employee_Id == employee.Employee_Id,
                 cancellationToken);
-            // Return HTTP 404 Not Found when `existingEmployee == null` is true.
+
             if (existingEmployee == null)
             {
                 return NotFound(new { message = "The employee could not be found." });
             }
 
-            // Return HTTP 400 Bad Request when `string.IsNullOrWhiteSpace(employee.FirstName) || string.IsNullOrWhiteSpace(employee.LastName) || string.IsNullOrWhiteSpace(employee.status)` is true.
+
             if (string.IsNullOrWhiteSpace(employee.FirstName) ||
                 string.IsNullOrWhiteSpace(employee.LastName) ||
                 string.IsNullOrWhiteSpace(employee.status))
@@ -1568,7 +1619,7 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             const string employeeNamePattern = @"^[\p{L}\p{M} ]+$";
-            // Return HTTP 400 Bad Request when `!Regex.IsMatch(employee.FirstName.Trim(), employeeNamePattern) || !Regex.IsMatch(employee.LastName.Trim(), employeeNamePattern) || (!string.IsNullOrWhiteSpace(employee.MiddleName) && !Regex.IsMatch(employee.MiddleName.Trim(), employeeNamePattern))` is true.
+
             if (!Regex.IsMatch(employee.FirstName.Trim(), employeeNamePattern) ||
                 !Regex.IsMatch(employee.LastName.Trim(), employeeNamePattern) ||
                 (!string.IsNullOrWhiteSpace(employee.MiddleName) &&
@@ -1577,35 +1628,35 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(new { message = "Employee names may contain letters and spaces only." });
             }
 
-            // Return HTTP 400 Bad Request when `!string.IsNullOrWhiteSpace(employee.ContactNumber) && !Regex.IsMatch(employee.ContactNumber.Trim(), @)` is true.
+
             if (!string.IsNullOrWhiteSpace(employee.ContactNumber) &&
                 !Regex.IsMatch(employee.ContactNumber.Trim(), @"^[0-9]{11}$"))
             {
                 return BadRequest(new { message = "Enter exactly 11 digits for the phone number." });
             }
 
-            // Return HTTP 400 Bad Request when `!string.IsNullOrWhiteSpace(employee.SSS_Number) && !Regex.IsMatch(employee.SSS_Number.Trim(), @)` is true.
+
             if (!string.IsNullOrWhiteSpace(employee.SSS_Number) &&
                 !Regex.IsMatch(employee.SSS_Number.Trim(), @"^[0-9]{2}-[0-9]{7}-[0-9]$"))
             {
                 return BadRequest(new { message = "Enter the SSS number as XX-XXXXXXX-X." });
             }
 
-            // Return HTTP 400 Bad Request when `!string.IsNullOrWhiteSpace(employee.Philhealth_Number) && !Regex.IsMatch(employee.Philhealth_Number.Trim(), @)` is true.
+
             if (!string.IsNullOrWhiteSpace(employee.Philhealth_Number) &&
                 !Regex.IsMatch(employee.Philhealth_Number.Trim(), @"^[0-9]{2}-[0-9]{9}-[0-9]$"))
             {
                 return BadRequest(new { message = "Enter the PhilHealth number as XX-XXXXXXXXX-X." });
             }
 
-            // Return HTTP 400 Bad Request when `!string.IsNullOrWhiteSpace(employee.Pagibig_Number) && !Regex.IsMatch(employee.Pagibig_Number.Trim(), @)` is true.
+
             if (!string.IsNullOrWhiteSpace(employee.Pagibig_Number) &&
                 !Regex.IsMatch(employee.Pagibig_Number.Trim(), @"^[0-9]{4}-[0-9]{4}-[0-9]{4}$"))
             {
                 return BadRequest(new { message = "Enter the Pag-IBIG number as XXXX-XXXX-XXXX." });
             }
 
-            // Return HTTP 400 Bad Request when `!employee.Department_ID.HasValue || !await _Localdb.Departments.AnyAsync( department => department.Department_ID == employee.Department_ID.Value, cancellationToken)` is true.
+
             if (!employee.Department_ID.HasValue ||
                 !await _Localdb.Departments.AnyAsync(
                     department => department.Department_ID == employee.Department_ID.Value,
@@ -1614,7 +1665,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(new { message = "Select a valid department." });
             }
 
-            // Return HTTP 400 Bad Request when `!employee.Role_ID.HasValue || !await _Localdb.Roles.AnyAsync( role => role.Role_ID == employee.Role_ID.Value, cancellationToken)` is true.
+
             if (!employee.Role_ID.HasValue ||
                 !await _Localdb.Roles.AnyAsync(
                     role => role.Role_ID == employee.Role_ID.Value,
@@ -1650,24 +1701,24 @@ namespace APINIMIRHEMAA.Controllers
             await using var transaction = await _Localdb.Database.BeginTransactionAsync(
                 IsolationLevel.Serializable,
                 cancellationToken);
-            // Enter this branch when `existingEmployee.Date_Resigned.HasValue` is true.
+
             if (existingEmployee.Date_Resigned.HasValue)
             {
                 await SetEmployeeAccountsActiveAsync(existingEmployee.Employee_Id, false, cancellationToken);
             }
-            // Persist the pending entity changes to the database at this point.
+
             await _Localdb.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return Ok(existingEmployee);
         }
 
-        /// <summary>Retrieves the local employee photo.</summary>
+
         [HttpGet("GetLocalEmployeePhoto")]
         public async Task<IActionResult> GetLocalEmployeePhoto(
             [FromQuery] int employeeId,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `employeeId <= 0` is true.
+
             if (employeeId <= 0)
             {
                 return BadRequest(new { message = "A valid employee ID is required." });
@@ -1681,7 +1732,7 @@ namespace APINIMIRHEMAA.Controllers
                 : File(photo.PhotoData, photo.ContentType);
         }
 
-        /// <summary>Persists the local employee photo.</summary>
+
         [HttpPut("SaveLocalEmployeePhoto")]
         [RequestSizeLimit(2 * 1024 * 1024 + 128 * 1024)]
         public async Task<IActionResult> SaveLocalEmployeePhoto(
@@ -1689,25 +1740,25 @@ namespace APINIMIRHEMAA.Controllers
             IFormFile? photo,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `employeeId <= 0` is true.
+
             if (employeeId <= 0)
             {
                 return BadRequest(new { message = "A valid employee ID is required." });
             }
 
-            // Return HTTP 400 Bad Request when `photo == null || photo.Length == 0` is true.
+
             if (photo == null || photo.Length == 0)
             {
                 return BadRequest(new { message = "Choose a JPG or PNG employee photo." });
             }
 
-            // Return HTTP 400 Bad Request when `photo.Length > 2 * 1024 * 1024` is true.
+
             if (photo.Length > 2 * 1024 * 1024)
             {
                 return BadRequest(new { message = "Employee photos must be 2 MB or smaller." });
             }
 
-            // Return HTTP 404 Not Found when `!await _Localdb.Employee.AnyAsync( employee => employee.Employee_Id == employeeId, cancellationToken)` is true.
+
             if (!await _Localdb.Employee.AnyAsync(
                     employee => employee.Employee_Id == employeeId,
                     cancellationToken))
@@ -1719,14 +1770,14 @@ namespace APINIMIRHEMAA.Controllers
             await photo.CopyToAsync(memoryStream, cancellationToken);
             var photoBytes = memoryStream.ToArray();
             var validationError = UploadValidator.ValidateImage(photoBytes);
-            // Return HTTP 400 Bad Request when `validationError != null` is true.
+
             if (validationError != null)
             {
                 return BadRequest(new { message = validationError });
             }
 
             var contentType = photo.ContentType.ToLowerInvariant();
-            // Return HTTP 400 Bad Request when `contentType is not ( or )` is true.
+
             if (contentType is not ("image/jpeg" or "image/png"))
             {
                 return BadRequest(new { message = "Employee photos must be JPG or PNG images." });
@@ -1734,7 +1785,7 @@ namespace APINIMIRHEMAA.Controllers
 
             var record = await _Localdb.EmployeeProfilePhotos
                 .FirstOrDefaultAsync(item => item.Employee_ID == employeeId, cancellationToken);
-            // Enter this branch when `record == null` is true.
+
             if (record == null)
             {
                 record = new EmployeeProfilePhoto
@@ -1746,7 +1797,7 @@ namespace APINIMIRHEMAA.Controllers
                 };
                 _Localdb.EmployeeProfilePhotos.Add(record);
             }
-            // Use this fallback path when the preceding condition is false.
+
             else
             {
                 record.PhotoData = photoBytes;
@@ -1754,26 +1805,26 @@ namespace APINIMIRHEMAA.Controllers
                 record.UpdatedAt = DateTime.UtcNow;
             }
 
-            // Persist the pending entity changes to the database at this point.
+
             await _Localdb.SaveChangesAsync(cancellationToken);
             return Ok(new { employeeId, message = "Employee photo saved." });
         }
 
-        /// <summary>Retrieves all roles from the local database.</summary>
+
         [HttpGet("GetLocalRoles")]
         public List<Roles> GetAllLocalRoles()
         {
             return _Localdb.Roles.ToList();
         }
 
-        /// <summary>Retrieves all departments from the local database.</summary>
+
         [HttpGet("GetLocalDeparments")]
         public List<Departments> GetAllLocalDepartments()
         {
             return _Localdb.Departments.ToList();
         }
 
-        /// <summary>Retrieves the client access options.</summary>
+
         [HttpGet("ClientAccessOptions")]
         public async Task<IActionResult> GetClientAccessOptions(CancellationToken cancellationToken)
         {
@@ -1791,9 +1842,9 @@ namespace APINIMIRHEMAA.Controllers
                     account.IsActive
                 }).ToListAsync(cancellationToken);
             var orderedMarketingEmployees = marketingEmployees
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .OrderBy(employee => employee.LastName, StringComparer.OrdinalIgnoreCase)
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .ThenBy(employee => employee.FirstName, StringComparer.OrdinalIgnoreCase)
                 .Select(employee => new ClientAccessEmployeeDto
                 {
@@ -1808,13 +1859,13 @@ namespace APINIMIRHEMAA.Controllers
             var clientOwnerIds = await _Localdb.Clients
                 .IgnoreQueryFilters()
                 .AsNoTracking()
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(client => client.CreatedByUserId.HasValue)
                 .Select(client => client.CreatedByUserId.Value)
                 .Distinct()
                 .ToListAsync(cancellationToken);
             var marketingOwners = orderedMarketingEmployees
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(employee => clientOwnerIds.Contains(employee.User_ID))
                 .ToList();
 
@@ -1825,13 +1876,13 @@ namespace APINIMIRHEMAA.Controllers
             });
         }
 
-        /// <summary>Retrieves the client access owner clients.</summary>
+
         [HttpGet("ClientAccessOwners/{userId:int}/Clients")]
         public async Task<IActionResult> GetClientAccessOwnerClients(
             int userId,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `!await MarketingUsers().AnyAsync( account => account.User_ID == userId, cancellationToken)` is true.
+
             if (!await MarketingUsers().AnyAsync(
                     account => account.User_ID == userId,
                     cancellationToken))
@@ -1842,7 +1893,7 @@ namespace APINIMIRHEMAA.Controllers
             var clients = await _Localdb.Clients
                 .IgnoreQueryFilters()
                 .AsNoTracking()
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(client => client.CreatedByUserId == userId)
                 .Select(client => new
                 {
@@ -1852,12 +1903,12 @@ namespace APINIMIRHEMAA.Controllers
                 .ToListAsync(cancellationToken);
 
             return Ok(clients
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .OrderBy(client => client.Client_Name, StringComparer.OrdinalIgnoreCase)
                 .ToList());
         }
 
-        /// <summary>Retrieves the client access grants.</summary>
+
         [HttpGet("ClientAccessGrants")]
         public async Task<ActionResult<List<ClientAccessGrantDto>>> GetClientAccessGrants(
             CancellationToken cancellationToken)
@@ -1883,11 +1934,11 @@ namespace APINIMIRHEMAA.Controllers
                 }).ToListAsync(cancellationToken);
 
             return Ok(grants
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .OrderBy(grant => grant.Client_Name, StringComparer.OrdinalIgnoreCase)
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .ThenBy(grant => grant.LastName, StringComparer.OrdinalIgnoreCase)
-                // Apply the ordering expression here before returning or materializing the results.
+
                 .ThenBy(grant => grant.FirstName, StringComparer.OrdinalIgnoreCase)
                 .Select(grant => new ClientAccessGrantDto
                 {
@@ -1901,33 +1952,33 @@ namespace APINIMIRHEMAA.Controllers
                 .ToList());
         }
 
-        /// <summary>Grants the specified user access to a client record.</summary>
+
         [HttpPost("ClientAccessGrants")]
         public async Task<IActionResult> GrantClientAccess(
             [FromBody] SaveClientAccessGrantDto request,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `request.Client_ID <= 0 || request.User_ID <= 0` is true.
+
             if (request.Client_ID <= 0 || request.User_ID <= 0)
             {
                 return BadRequest(new { message = "Select a valid client and Marketing employee." });
             }
 
-            // Return HTTP 404 Not Found when `!await _Localdb.Clients.IgnoreQueryFilters() .AnyAsync(client => client.Client_ID == request.Client_ID, cancellationToken)` is true.
+
             if (!await _Localdb.Clients.IgnoreQueryFilters()
                     .AnyAsync(client => client.Client_ID == request.Client_ID, cancellationToken))
             {
                 return NotFound(new { message = "The selected client could not be found." });
             }
 
-            // Return HTTP 400 Bad Request when `!await ActiveMarketingUsers() .AnyAsync(account => account.User_ID == request.User_ID, cancellationToken)` is true.
+
             if (!await ActiveMarketingUsers()
                     .AnyAsync(account => account.User_ID == request.User_ID, cancellationToken))
             {
                 return BadRequest(new { message = "Access can only be granted to an active Marketing employee with a user account." });
             }
 
-            // Enter this branch when `!await _Localdb.ClientAccessGrants.AnyAsync( grant => grant.Client_ID == request.Client_ID && grant.User_ID == request.User_ID, cancellationToken)` is true.
+
             if (!await _Localdb.ClientAccessGrants.AnyAsync(
                     grant => grant.Client_ID == request.Client_ID && grant.User_ID == request.User_ID,
                     cancellationToken))
@@ -1938,7 +1989,7 @@ namespace APINIMIRHEMAA.Controllers
                     User_ID = request.User_ID,
                     GrantedAtUtc = DateTime.UtcNow
                 });
-                // Persist the pending entity changes to the database at this point.
+
                 await _Localdb.SaveChangesAsync(cancellationToken);
             }
 
@@ -1950,7 +2001,7 @@ namespace APINIMIRHEMAA.Controllers
                 var cloudMarketingUserExists = await _Clouddb.Users.AsNoTracking()
                     .AnyAsync(account => account.User_ID == request.User_ID && account.IsActive, cancellationToken);
 
-                // Enter this branch when `cloudClientExists && cloudMarketingUserExists && !await _Clouddb.ClientAccessGrants.AnyAsync( grant => grant.Client_ID == request.Client_ID && grant.User_ID == request.User_ID, cancellationToken)` is true.
+
                 if (cloudClientExists && cloudMarketingUserExists &&
                     !await _Clouddb.ClientAccessGrants.AnyAsync(
                         grant => grant.Client_ID == request.Client_ID && grant.User_ID == request.User_ID,
@@ -1962,17 +2013,17 @@ namespace APINIMIRHEMAA.Controllers
                         User_ID = request.User_ID,
                         GrantedAtUtc = DateTime.UtcNow
                     });
-                    // Persist the pending entity changes to the database at this point.
+
                     await _Clouddb.SaveChangesAsync(cancellationToken);
                 }
             }
-            // Handle `SqlException exception` raised by the preceding operation.
+
             catch (SqlException exception)
             {
                 cloudSyncPending = true;
                 _logger.LogWarning(exception, "Client access was saved locally, but cloud synchronization failed.");
             }
-            // Handle `TimeoutException exception` raised by the preceding operation.
+
             catch (TimeoutException exception)
             {
                 cloudSyncPending = true;
@@ -1988,7 +2039,7 @@ namespace APINIMIRHEMAA.Controllers
             });
         }
 
-        /// <summary>Grants the selected employees access to a client record.</summary>
+
         [HttpPost("ClientAccessGrants/Bulk")]
         public async Task<IActionResult> GrantClientAccessToMultipleEmployees(
             [FromBody] SaveClientAccessGrantsDto request,
@@ -1996,7 +2047,7 @@ namespace APINIMIRHEMAA.Controllers
         {
             var clientIds = request.Client_IDs?.Distinct().ToList() ?? new List<int>();
             var userIds = request.User_IDs?.Distinct().ToList() ?? new List<int>();
-            // Return HTTP 400 Bad Request when `request.OwnerUser_ID <= 0 || clientIds.Count == 0 || userIds.Count == 0 || clientIds.Any(id => id <= 0) || userIds.Any(id => id <= 0) || userIds.Contains(request.OwnerUser_ID)` is true.
+
             if (request.OwnerUser_ID <= 0 ||
                 clientIds.Count == 0 ||
                 userIds.Count == 0 ||
@@ -2007,7 +2058,7 @@ namespace APINIMIRHEMAA.Controllers
                 return BadRequest(new { message = "Select an owner, at least one client, and at least one different Marketing employee." });
             }
 
-            // Return HTTP 400 Bad Request when `!await MarketingUsers().AnyAsync( account => account.User_ID == request.OwnerUser_ID, cancellationToken)` is true.
+
             if (!await MarketingUsers().AnyAsync(
                     account => account.User_ID == request.OwnerUser_ID,
                     cancellationToken))
@@ -2021,25 +2072,25 @@ namespace APINIMIRHEMAA.Controllers
                     client => clientIds.Contains(client.Client_ID) &&
                         client.CreatedByUserId == request.OwnerUser_ID,
                     cancellationToken);
-            // Return HTTP 400 Bad Request when `ownedClientCount != clientIds.Count` is true.
+
             if (ownedClientCount != clientIds.Count)
             {
                 return BadRequest(new { message = "One or more selected clients do not belong to the selected employee." });
             }
 
             var eligibleUserIds = await ActiveMarketingUsers()
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(account => userIds.Contains(account.User_ID))
                 .Select(account => account.User_ID)
                 .ToListAsync(cancellationToken);
-            // Return HTTP 400 Bad Request when `eligibleUserIds.Count != userIds.Count` is true.
+
             if (eligibleUserIds.Count != userIds.Count)
             {
                 return BadRequest(new { message = "One or more selected recipients are not active Marketing employees with user accounts." });
             }
 
             var existingLocalGrants = await _Localdb.ClientAccessGrants
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(grant =>
                     clientIds.Contains(grant.Client_ID) &&
                     userIds.Contains(grant.User_ID))
@@ -2047,13 +2098,13 @@ namespace APINIMIRHEMAA.Controllers
             var existingLocalPairs = existingLocalGrants
                 .Select(grant => (grant.Client_ID, grant.User_ID))
                 .ToHashSet();
-            // Process each `clientId` returned by the collection expression in the loop header.
+
             foreach (var clientId in clientIds)
             {
-                // Process each `userId` returned by the collection expression in the loop header.
+
                 foreach (var userId in userIds)
                 {
-                    // Enter this branch when `!existingLocalPairs.Contains((clientId, userId))` is true.
+
                     if (!existingLocalPairs.Contains((clientId, userId)))
                     {
                         _Localdb.ClientAccessGrants.Add(new ClientAccessGrant
@@ -2065,10 +2116,10 @@ namespace APINIMIRHEMAA.Controllers
                     }
                 }
             }
-            // Enter this branch when `_Localdb.ChangeTracker.HasChanges()` is true.
+
             if (_Localdb.ChangeTracker.HasChanges())
             {
-                // Persist the pending entity changes to the database at this point.
+
                 await _Localdb.SaveChangesAsync(cancellationToken);
             }
 
@@ -2077,22 +2128,22 @@ namespace APINIMIRHEMAA.Controllers
             {
                 var cloudClientIds = await _Clouddb.Clients
                     .IgnoreQueryFilters()
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(client =>
                         clientIds.Contains(client.Client_ID) &&
                         client.CreatedByUserId == request.OwnerUser_ID)
                     .Select(client => client.Client_ID)
                     .ToListAsync(cancellationToken);
                 var cloudUserIds = await _Clouddb.Users.AsNoTracking()
-                    // Apply this predicate in the database query before materializing results.
+
                     .Where(account => userIds.Contains(account.User_ID) && account.IsActive)
                     .Select(account => account.User_ID)
                     .ToListAsync(cancellationToken);
-                // Enter this branch when `cloudClientIds.Count > 0 && cloudUserIds.Count > 0` is true.
+
                 if (cloudClientIds.Count > 0 && cloudUserIds.Count > 0)
                 {
                     var existingCloudGrants = await _Clouddb.ClientAccessGrants
-                        // Apply this predicate in the database query before materializing results.
+
                         .Where(grant =>
                             cloudClientIds.Contains(grant.Client_ID) &&
                             cloudUserIds.Contains(grant.User_ID))
@@ -2100,13 +2151,13 @@ namespace APINIMIRHEMAA.Controllers
                     var existingCloudPairs = existingCloudGrants
                         .Select(grant => (grant.Client_ID, grant.User_ID))
                         .ToHashSet();
-                    // Process each `clientId` returned by the collection expression in the loop header.
+
                     foreach (var clientId in cloudClientIds)
                     {
-                        // Process each `userId` returned by the collection expression in the loop header.
+
                         foreach (var userId in cloudUserIds)
                         {
-                            // Enter this branch when `!existingCloudPairs.Contains((clientId, userId))` is true.
+
                             if (!existingCloudPairs.Contains((clientId, userId)))
                             {
                                 _Clouddb.ClientAccessGrants.Add(new ClientAccessGrant
@@ -2118,21 +2169,21 @@ namespace APINIMIRHEMAA.Controllers
                             }
                         }
                     }
-                    // Enter this branch when `_Clouddb.ChangeTracker.HasChanges()` is true.
+
                     if (_Clouddb.ChangeTracker.HasChanges())
                     {
-                        // Persist the pending entity changes to the database at this point.
+
                         await _Clouddb.SaveChangesAsync(cancellationToken);
                     }
                 }
             }
-            // Handle `SqlException exception` raised by the preceding operation.
+
             catch (SqlException exception)
             {
                 cloudSyncPending = true;
                 _logger.LogWarning(exception, "Client access was saved locally, but cloud synchronization failed.");
             }
-            // Handle `TimeoutException exception` raised by the preceding operation.
+
             catch (TimeoutException exception)
             {
                 cloudSyncPending = true;
@@ -2150,7 +2201,7 @@ namespace APINIMIRHEMAA.Controllers
             });
         }
 
-        /// <summary>Revokes the specified user's access to a client record.</summary>
+
         [HttpDelete("ClientAccessGrants/{clientId:int}/{userId:int}")]
         public async Task<IActionResult> RevokeClientAccess(
             int clientId,
@@ -2161,11 +2212,11 @@ namespace APINIMIRHEMAA.Controllers
                 .FirstOrDefaultAsync(
                     grant => grant.Client_ID == clientId && grant.User_ID == userId,
                     cancellationToken);
-            // Enter this branch when `localGrant != null` is true.
+
             if (localGrant != null)
             {
                 _Localdb.ClientAccessGrants.Remove(localGrant);
-                // Persist the pending entity changes to the database at this point.
+
                 await _Localdb.SaveChangesAsync(cancellationToken);
             }
 
@@ -2177,29 +2228,29 @@ namespace APINIMIRHEMAA.Controllers
                     .FirstOrDefaultAsync(
                         grant => grant.Client_ID == clientId && grant.User_ID == userId,
                         cancellationToken);
-                // Enter this branch when `cloudGrant != null` is true.
+
                 if (cloudGrant != null)
                 {
                     _Clouddb.ClientAccessGrants.Remove(cloudGrant);
-                    // Persist the pending entity changes to the database at this point.
+
                     await _Clouddb.SaveChangesAsync(cancellationToken);
                     cloudGrantRemoved = true;
                 }
             }
-            // Handle `SqlException exception` raised by the preceding operation.
+
             catch (SqlException exception)
             {
                 cloudSyncPending = true;
                 _logger.LogWarning(exception, "Client access was revoked locally, but cloud synchronization failed.");
             }
-            // Handle `TimeoutException exception` raised by the preceding operation.
+
             catch (TimeoutException exception)
             {
                 cloudSyncPending = true;
                 _logger.LogWarning(exception, "Client access was revoked locally, but cloud synchronization timed out.");
             }
 
-            // Return HTTP 404 Not Found when `localGrant == null && !cloudGrantRemoved && !cloudSyncPending` is true.
+
             if (localGrant == null && !cloudGrantRemoved && !cloudSyncPending)
             {
                 return NotFound(new { message = "The client access grant could not be found." });
@@ -2216,7 +2267,7 @@ namespace APINIMIRHEMAA.Controllers
             });
         }
 
-        /// <summary>Retrieves the access permissions.</summary>
+
         [HttpGet("AccessPermissions")]
         public async Task<ActionResult<List<AccessPermissionValueDto>>> GetAccessPermissions(
             [FromQuery] int? roleId,
@@ -2224,24 +2275,24 @@ namespace APINIMIRHEMAA.Controllers
             [FromQuery] int? userId,
             CancellationToken cancellationToken)
         {
-            // Enter this branch when `userId.HasValue` is true.
+
             if (userId.HasValue)
             {
-                // Return HTTP 404 Not Found when `!await _Localdb.Users.AnyAsync(user => user.User_ID == userId.Value, cancellationToken)` is true.
+
                 if (!await _Localdb.Users.AnyAsync(user => user.User_ID == userId.Value, cancellationToken))
                     return NotFound(new { message = "The selected user account could not be found." });
             }
-            // Return HTTP 400 Bad Request when `!roleId.HasValue && !departmentId.HasValue` is true.
+
             else if (!roleId.HasValue && !departmentId.HasValue)
             {
                 return BadRequest(new { message = "Select a role, department, or user." });
             }
 
-            // Return HTTP 400 Bad Request when `roleId.HasValue && !await _Localdb.Roles.AnyAsync(role => role.Role_ID == roleId.Value, cancellationToken)` is true.
+
             if (roleId.HasValue &&
                 !await _Localdb.Roles.AnyAsync(role => role.Role_ID == roleId.Value, cancellationToken))
                 return BadRequest(new { message = "The selected role could not be found." });
-            // Return HTTP 400 Bad Request when `departmentId.HasValue && !await _Localdb.Departments.AnyAsync(department => department.Department_ID == departmentId.Value, cancellationToken)` is true.
+
             if (departmentId.HasValue &&
                 !await _Localdb.Departments.AnyAsync(department => department.Department_ID == departmentId.Value, cancellationToken))
                 return BadRequest(new { message = "The selected department could not be found." });
@@ -2250,7 +2301,7 @@ namespace APINIMIRHEMAA.Controllers
                 userId, roleId, departmentId, cancellationToken));
         }
 
-        /// <summary>Retrieves the access permission active status.</summary>
+
         [HttpGet("AccessPermissions/active-status")]
         public async Task<ActionResult> GetAccessPermissionActiveStatus(
             [FromQuery] int? roleId,
@@ -2258,38 +2309,38 @@ namespace APINIMIRHEMAA.Controllers
             [FromQuery] int? userId,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `userId.HasValue && (roleId.HasValue || departmentId.HasValue)` is true.
+
             if (userId.HasValue && (roleId.HasValue || departmentId.HasValue))
                 return BadRequest(new { message = "Select either a specific user or a role/department scope." });
-            // Return HTTP 400 Bad Request when `!userId.HasValue && !roleId.HasValue && !departmentId.HasValue` is true.
+
             if (!userId.HasValue && !roleId.HasValue && !departmentId.HasValue)
                 return BadRequest(new { message = "Select a role, department, or user." });
 
-            // Return HTTP 404 Not Found when `userId.HasValue && !await _Localdb.Users.AnyAsync(user => user.User_ID == userId.Value, cancellationToken)` is true.
+
             if (userId.HasValue &&
                 !await _Localdb.Users.AnyAsync(user => user.User_ID == userId.Value, cancellationToken))
                 return NotFound(new { message = "The selected user account could not be found." });
-            // Return HTTP 400 Bad Request when `roleId.HasValue && !await _Localdb.Roles.AnyAsync(role => role.Role_ID == roleId.Value, cancellationToken)` is true.
+
             if (roleId.HasValue &&
                 !await _Localdb.Roles.AnyAsync(role => role.Role_ID == roleId.Value, cancellationToken))
                 return BadRequest(new { message = "The selected role could not be found." });
-            // Return HTTP 400 Bad Request when `departmentId.HasValue && !await _Localdb.Departments.AnyAsync(department => department.Department_ID == departmentId.Value, cancellationToken)` is true.
+
             if (departmentId.HasValue &&
                 !await _Localdb.Departments.AnyAsync(department => department.Department_ID == departmentId.Value, cancellationToken))
                 return BadRequest(new { message = "The selected department could not be found." });
 
             IQueryable<Users> affectedUsers = _Localdb.Users.AsNoTracking();
-            // Enter this branch when `userId.HasValue` is true.
+
             if (userId.HasValue)
-                // Apply this predicate in the database query before materializing results.
+
                 affectedUsers = affectedUsers.Where(user => user.User_ID == userId.Value);
-            // Enter this branch when `roleId.HasValue` is true.
+
             if (roleId.HasValue)
-                // Apply this predicate in the database query before materializing results.
+
                 affectedUsers = affectedUsers.Where(user => user.Role_ID == roleId.Value);
-            // Enter this branch when `departmentId.HasValue` is true.
+
             if (departmentId.HasValue)
-                // Apply this predicate in the database query before materializing results.
+
                 affectedUsers = affectedUsers.Where(user => user.Department_ID == departmentId.Value);
 
             var affectedUserIds = await affectedUsers
@@ -2300,28 +2351,28 @@ namespace APINIMIRHEMAA.Controllers
             return Ok(new { hasActiveUsers });
         }
 
-        /// <summary>Persists the access permissions.</summary>
+
         [HttpPut("AccessPermissions")]
         public async Task<IActionResult> SaveAccessPermissions(
             [FromBody] SaveAccessPermissionsDto request,
             CancellationToken cancellationToken)
         {
-            // Return HTTP 400 Bad Request when `request.User_ID.HasValue && (request.Role_ID.HasValue || request.Department_ID.HasValue)` is true.
+
             if (request.User_ID.HasValue && (request.Role_ID.HasValue || request.Department_ID.HasValue))
                 return BadRequest(new { message = "User-specific changes cannot update role or department permissions." });
-            // Return HTTP 400 Bad Request when `!request.User_ID.HasValue && !request.Role_ID.HasValue && !request.Department_ID.HasValue` is true.
+
             if (!request.User_ID.HasValue && !request.Role_ID.HasValue && !request.Department_ID.HasValue)
                 return BadRequest(new { message = "Select a role, department, or user before saving permissions." });
 
-            // Return HTTP 404 Not Found when `request.User_ID.HasValue && !await _Localdb.Users.AnyAsync(user => user.User_ID == request.User_ID.Value, cancellationToken)` is true.
+
             if (request.User_ID.HasValue &&
                 !await _Localdb.Users.AnyAsync(user => user.User_ID == request.User_ID.Value, cancellationToken))
                 return NotFound(new { message = "The selected user account could not be found." });
-            // Return HTTP 400 Bad Request when `request.Role_ID.HasValue && !await _Localdb.Roles.AnyAsync(role => role.Role_ID == request.Role_ID.Value, cancellationToken)` is true.
+
             if (request.Role_ID.HasValue &&
                 !await _Localdb.Roles.AnyAsync(role => role.Role_ID == request.Role_ID.Value, cancellationToken))
                 return BadRequest(new { message = "The selected role could not be found." });
-            // Return HTTP 400 Bad Request when `request.Department_ID.HasValue && !await _Localdb.Departments.AnyAsync(department => department.Department_ID == request.Department_ID.Value, cancellationToken)` is true.
+
             if (request.Department_ID.HasValue &&
                 !await _Localdb.Departments.AnyAsync(department => department.Department_ID == request.Department_ID.Value, cancellationToken))
                 return BadRequest(new { message = "The selected department could not be found." });
@@ -2332,7 +2383,7 @@ namespace APINIMIRHEMAA.Controllers
                 .Select(permission => AccessPermissionService.Key(permission.ServiceKey, permission.ActionKey))
                 .Distinct(StringComparer.Ordinal)
                 .Count();
-            // Return HTTP 400 Bad Request when `permissions.Count != expectedCount || distinctKeys != expectedCount || permissions.Any(permission => !AccessPermissionCatalog.IsValid(permission.ServiceKey, permission.ActionKey))` is true.
+
             if (permissions.Count != expectedCount ||
                 distinctKeys != expectedCount ||
                 permissions.Any(permission =>
@@ -2344,23 +2395,23 @@ namespace APINIMIRHEMAA.Controllers
             await using var transaction = await _Localdb.Database.BeginTransactionAsync(
                 IsolationLevel.Serializable, cancellationToken);
             IQueryable<Users> affectedUsers = _Localdb.Users.AsNoTracking();
-            // Enter this branch when `request.User_ID.HasValue` is true.
+
             if (request.User_ID.HasValue)
-                // Apply this predicate in the database query before materializing results.
+
                 affectedUsers = affectedUsers.Where(user => user.User_ID == request.User_ID.Value);
-            // Enter this branch when `request.Role_ID.HasValue` is true.
+
             if (request.Role_ID.HasValue)
-                // Apply this predicate in the database query before materializing results.
+
                 affectedUsers = affectedUsers.Where(user => user.Role_ID == request.Role_ID.Value);
-            // Enter this branch when `request.Department_ID.HasValue` is true.
+
             if (request.Department_ID.HasValue)
-                // Apply this predicate in the database query before materializing results.
+
                 affectedUsers = affectedUsers.Where(user => user.Department_ID == request.Department_ID.Value);
 
             var affectedUserIds = await affectedUsers
                 .Select(user => user.User_ID)
                 .ToListAsync(cancellationToken);
-            // Return HTTP 409 Conflict when `await _userSessions.HasActiveSessionsAsync(affectedUserIds, cancellationToken)` is true.
+
             if (await _userSessions.HasActiveSessionsAsync(affectedUserIds, cancellationToken))
             {
                 return Conflict(new
@@ -2370,7 +2421,7 @@ namespace APINIMIRHEMAA.Controllers
             }
 
             var existing = await _Localdb.AccessPermissions
-                // Apply this predicate in the database query before materializing results.
+
                 .Where(permission =>
                     permission.User_ID == request.User_ID &&
                     permission.Role_ID == request.Role_ID &&
@@ -2386,14 +2437,14 @@ namespace APINIMIRHEMAA.Controllers
                 ActionKey = permission.ActionKey,
                 IsAllowed = permission.Allowed
             }));
-            // Persist the pending entity changes to the database at this point.
+
             await _Localdb.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
             return Ok(new { message = "Access permissions saved successfully." });
         }
 
-        // Returns user accounts whose linked employees belong to Marketing.
+
         private IQueryable<Users> MarketingUsers()
         {
             return
@@ -2406,9 +2457,9 @@ namespace APINIMIRHEMAA.Controllers
                 select account;
         }
 
-        // Filters Marketing user accounts to those that are active.
+
         private IQueryable<Users> ActiveMarketingUsers() =>
-            // Filter the query to rows satisfying `ers().Where(account => account.IsActive); } }` before materializing the results.
+
             MarketingUsers().Where(account => account.IsActive);
     }
 }

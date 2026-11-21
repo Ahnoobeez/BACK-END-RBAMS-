@@ -3,10 +3,10 @@ using System.Text;
 
 namespace APINIMIRHEMAA.Services
 {
-    // Provides the supported security questions and enrollment helpers.
+
     public sealed record SecurityQuestion(int Id, string Text);
 
-    // Provides reusable application operations for security question catalog workflows.
+
     public static class SecurityQuestionCatalog
     {
         public const int RequiredEnrollmentAnswerCount = 10;
@@ -45,27 +45,27 @@ namespace APINIMIRHEMAA.Services
             new SecurityQuestion(30, "What was the name of the first organization you joined?")
         };
 
-        // Checks whether the user has completed the required security-question enrollment.
+
         public static bool HasCompleteAnswerSet(int answerCount) =>
             answerCount == RequiredEnrollmentAnswerCount;
 
-        // Checks whether the saved security answers are sufficient for account recovery.
+
         public static bool HasRecoverableAnswerSet(int answerCount) =>
             HasCompleteAnswerSet(answerCount) || answerCount == All.Count;
 
-        // Selects three distinct security questions, optionally restricted to eligible question IDs.
+
         public static IReadOnlyList<SecurityQuestion> SelectRandomThree(IEnumerable<int>? questionIds = null)
         {
             var ids = (questionIds ?? Enumerable.Range(1, All.Count))
                 .Distinct()
                 .ToArray();
-            // Raise an exception when `ids.Length < 3 || ids.Any(id => id < 1 || id > All.Count)` is true.
+
             if (ids.Length < 3 || ids.Any(id => id < 1 || id > All.Count))
             {
                 throw new ArgumentException("At least three valid security question IDs are required.", nameof(questionIds));
             }
 
-            // Repeat the body while `the loop condition` remains true.
+
             for (var index = ids.Length - 1; index > 0; index--)
             {
                 var swapIndex = RandomNumberGenerator.GetInt32(index + 1);
@@ -74,7 +74,7 @@ namespace APINIMIRHEMAA.Services
             return ids.Take(3).Select(id => All[id - 1]).ToArray();
         }
 
-        // Normalizes the answer for consistent use.
+
         public static string NormalizeAnswer(string answer) =>
             answer.Trim().Normalize(NormalizationForm.FormC).ToUpperInvariant();
     }

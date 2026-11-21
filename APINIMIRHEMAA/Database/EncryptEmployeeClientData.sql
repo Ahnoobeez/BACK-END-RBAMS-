@@ -1,9 +1,9 @@
--- Run this script once against both the local and cloud databases before deploying
--- the API version that uses EncryptedDataMapping. Back up each database first.
--- Back up the existing ASP.NET Data Protection key ring and keep it available;
--- losing those keys makes the encrypted records permanently unreadable.
--- After deployment, call POST /api/Admin/EncryptExistingEmployeeClientData as
--- an Admin or Super Admin to encrypt existing rows. The endpoint is safe to rerun.
+
+
+
+
+
+
 
 SET XACT_ABORT ON;
 BEGIN TRANSACTION;

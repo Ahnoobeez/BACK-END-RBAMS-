@@ -1,6 +1,6 @@
--- Run once in both configured application databases before deploying the API.
--- Existing CreatedBy names are linked only when they identify exactly one account.
--- Unmatched or ambiguous legacy records remain available to Admin and Super Admin.
+
+
+
 GO
 
 DECLARE @Tables TABLE (TableName sysname PRIMARY KEY);

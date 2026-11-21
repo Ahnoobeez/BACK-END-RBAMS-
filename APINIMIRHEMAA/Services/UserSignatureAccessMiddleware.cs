@@ -4,19 +4,19 @@ using System.Security.Claims;
 
 namespace APINIMIRHEMAA.Services
 {
-    // Provides reusable application operations for user signature access middleware workflows.
+
     public sealed class UserSignatureAccessMiddleware
     {
-        // Injected or cached next dependency/state used by this class.
+
         private readonly RequestDelegate _next;
 
-        // Initializes a new user signature access middleware instance.
+
         public UserSignatureAccessMiddleware(RequestDelegate next)
         {
             _next = next;
         }
 
-        // Validates the authenticated account and required signature before continuing the request pipeline.
+
         public async Task InvokeAsync(HttpContext context, LocalDbContext db)
         {
             var path = context.Request.Path.Value ?? string.Empty;
@@ -33,7 +33,7 @@ namespace APINIMIRHEMAA.Services
                  string.Equals(path, "/api/Production/GetDeliveryReceiptApprovalItems", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(path, "/api/Production/GetDeliveryReceiptApprovalSignatures", StringComparison.OrdinalIgnoreCase));
 
-            // Enter this branch when `!path.StartsWith(, StringComparison.OrdinalIgnoreCase) || context.User.Identity?.IsAuthenticated != true` is true.
+
             if (!path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase) ||
                 context.User.Identity?.IsAuthenticated != true)
             {
@@ -41,7 +41,7 @@ namespace APINIMIRHEMAA.Services
                 return;
             }
 
-            // Return HTTP 401 Unauthorized when `!int.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)` is true.
+
             if (!int.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -57,7 +57,7 @@ namespace APINIMIRHEMAA.Services
             var isActiveAccount = await db.Users
                 .AsNoTracking()
                 .AnyAsync(user => user.User_ID == userId && user.IsActive, context.RequestAborted);
-            // Return HTTP 401 Unauthorized when `!isActiveAccount && !isSessionEndEndpoint` is true.
+
             if (!isActiveAccount && !isSessionEndEndpoint)
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -67,7 +67,7 @@ namespace APINIMIRHEMAA.Services
                 return;
             }
 
-            // Enter this branch when `isSignatureEndpoint || isSessionPresenceEndpoint || isDeliveryReceiptApprovalReadEndpoint` is true.
+
             if (isSignatureEndpoint || isSessionPresenceEndpoint || isDeliveryReceiptApprovalReadEndpoint)
             {
                 await _next(context);
@@ -81,7 +81,7 @@ namespace APINIMIRHEMAA.Services
                     signature.SignatureData.Length > 0,
                     context.RequestAborted);
 
-            // Return HTTP 403 Forbidden when `!hasSignature` is true.
+
             if (!hasSignature)
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;

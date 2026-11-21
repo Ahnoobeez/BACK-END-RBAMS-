@@ -1,4 +1,4 @@
--- Run in both configured databases after RemoveClientsProject.sql; safe to rerun.
+
 IF OBJECT_ID(N'dbo.Quotation', N'U') IS NULL
     THROW 50021, 'Required table dbo.Quotation was not found in the current database.', 1;
 

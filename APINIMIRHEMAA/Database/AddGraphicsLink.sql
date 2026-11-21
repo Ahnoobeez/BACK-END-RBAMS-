@@ -1,4 +1,4 @@
--- Run once in each configured application database before deploying the API.
+
 IF OBJECT_ID(N'dbo.Graphics', N'U') IS NULL
     THROW 50009, 'Required table dbo.Graphics was not found in the current database.', 1;
 

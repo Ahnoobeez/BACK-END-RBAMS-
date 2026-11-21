@@ -1,5 +1,5 @@
--- Run against each Local and Cloud database that contains dbo.Quotation.
--- Legacy discount and ingress/egress columns are left intact to preserve existing records.
+
+
 IF OBJECT_ID(N'dbo.Quotation', N'U') IS NULL
     THROW 50003, 'Required table dbo.Quotation was not found in the current database.', 1;
 

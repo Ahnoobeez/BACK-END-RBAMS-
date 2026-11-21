@@ -1,4 +1,4 @@
--- Run against each configured application database before deploying the API.
+
 IF OBJECT_ID(N'dbo.ServiceInvoice', N'U') IS NULL
     THROW 50007, 'Required table dbo.ServiceInvoice was not found.', 1;
 IF OBJECT_ID(N'dbo.JobOrder', N'U') IS NULL
@@ -8,7 +8,7 @@ IF OBJECT_ID(N'dbo.JobOrderItems', N'U') IS NULL
 IF OBJECT_ID(N'dbo.Quotation_Items', N'U') IS NULL
     THROW 50011, 'Required table dbo.Quotation_Items was not found.', 1;
 
--- Quantity is an existing IDENTITY column, so the new key uses a sequence instead.
+
 IF COL_LENGTH(N'dbo.ServiceInvoice', N'ServiceInvoice_ID') IS NULL
     ALTER TABLE dbo.ServiceInvoice ADD ServiceInvoice_ID int NULL;
 IF COL_LENGTH(N'dbo.JobOrderItems', N'QI_ID') IS NULL
@@ -169,7 +169,7 @@ BEGIN
 END
 GO
 
--- Preserve existing detail rows as single-line invoices.
+
 INSERT INTO dbo.ServiceInvoiceItems
     (ServiceInvoice_ID, Quantity, Unit, Description, Unit_Price, Amount)
 SELECT

@@ -1,4 +1,4 @@
--- Run against each database containing dbo.ServiceInvoice before deploying the updated API.
+
 IF OBJECT_ID(N'dbo.ServiceInvoice', N'U') IS NULL
     THROW 50007, 'Required table dbo.ServiceInvoice was not found in the current database.', 1;
 

@@ -1,4 +1,4 @@
--- Run against each database that contains dbo.Clients before deploying the updated API.
+
 IF OBJECT_ID(N'dbo.Clients', N'U') IS NULL
     THROW 50003, 'Required table dbo.Clients was not found in the current database.', 1;
 

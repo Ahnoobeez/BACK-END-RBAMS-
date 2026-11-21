@@ -1,4 +1,4 @@
--- Run against the database used by /Marketing/AddLocalQuotationItems before deploying.
+
 IF OBJECT_ID(N'dbo.Quotation_Items', N'U') IS NULL
     THROW 50002, 'Required table dbo.Quotation_Items was not found in the current database.', 1;
 

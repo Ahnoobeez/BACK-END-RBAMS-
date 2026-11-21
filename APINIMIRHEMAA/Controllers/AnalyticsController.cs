@@ -9,22 +9,22 @@ namespace APINIMIRHEMAA.Controllers
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
-    // Coordinates the analytics controller API endpoints, including request handling and response generation.
+
     public class AnalyticsController : ControllerBase
     {
-        // Injected or cached local db dependency/state used by this class.
+
         private readonly LocalDbContext _localDb;
-        // Encryption service used to protect sensitive persisted values.
+
         private readonly EncryptionService _encryptionService;
 
-        // Initializes a new analytics controller instance.
+
         public AnalyticsController(LocalDbContext localDb, EncryptionService encryptionService)
         {
             _localDb = localDb;
             _encryptionService = encryptionService;
         }
 
-        /// <summary>Retrieves the company overview.</summary>
+
         [HttpGet("GetCompanyOverview")]
         public ActionResult GetCompanyOverview()
         {
@@ -93,7 +93,7 @@ namespace APINIMIRHEMAA.Controllers
             });
         }
 
-        /// <summary>Retrieves the marketing overview.</summary>
+
         [Authorize(Policy = "marketing")]
         [HttpGet("GetMarketingOverview")]
         public async Task<ActionResult> GetMarketingOverview(CancellationToken cancellationToken)
@@ -126,9 +126,12 @@ namespace APINIMIRHEMAA.Controllers
                 .AsNoTracking()
                 .Select(quotation => new
                 {
+                    quotation.Quotation_ID,
                     quotation.Client_ID,
+                    quotation.Title,
                     quotation.Overall_Total,
-                    quotation.Status
+                    quotation.Status,
+                    quotation.Start_Date
                 })
                 .ToListAsync(cancellationToken);
             var jobs = await _localDb.JobOrder
@@ -145,25 +148,25 @@ namespace APINIMIRHEMAA.Controllers
             });
         }
 
-        // Treats a blank status or a normalized pending status as pending.
+
         private static bool IsPending(string? status) =>
             string.IsNullOrWhiteSpace(status) || GetStatusGroup(status) == "pending";
 
-        // Classifies a status value into its normalized workflow group.
+
         private static string GetStatusGroup(string? status)
         {
             var value = (status ?? "").Trim().ToLowerInvariant();
-            // Exit the current operation when `value.Contains() || value.Contains() || value.Contains()` is true.
+
             if (value.Contains("reject") || value.Contains("cancel") || value.Contains("declin"))
                 return "rejected";
-            // Exit the current operation when `value.Contains() || value.Contains() || value ==` is true.
+
             if (value.Contains("complete") || value.Contains("deliver") || value == "done")
                 return "completed";
-            // Exit the current operation when `value.Contains() || value.Contains() || value.Contains() || value.Contains() || value.Contains()` is true.
+
             if (value.Contains("progress") || value.Contains("ongoing") || value.Contains("active") ||
                 value.Contains("started") || value.Contains("onsite"))
                 return "progress";
-            // Exit the current operation when `value.Contains() || value.Contains() || value ==` is true.
+
             if (value.Contains("pending") || value.Contains("await") || value == "open")
                 return "pending";
             return "";

@@ -1,4 +1,4 @@
--- Run against each configured application database before deploying the API.
+
 IF OBJECT_ID(N'dbo.ServiceInvoice', N'U') IS NULL
     THROW 50032, 'Required table dbo.ServiceInvoice was not found.', 1;
 IF OBJECT_ID(N'dbo.ServiceInvoiceItems', N'U') IS NULL

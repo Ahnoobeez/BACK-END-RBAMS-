@@ -5,19 +5,19 @@ using System.Text;
 
 namespace APINIMIRHEMAA.Services
 {
-    // Provides reusable application operations for jwt service workflows.
+
     public class JwtService
     {
-        // Injected or cached configuration dependency/state used by this class.
+
         private readonly IConfiguration _configuration;
 
-        // Initializes a new jwt service instance.
+
         public JwtService(IConfiguration configuration)
         {
             _configuration = configuration;
         }
 
-        // Generates the token.
+
         public string GenerateToken(
             int userId,
             string username,

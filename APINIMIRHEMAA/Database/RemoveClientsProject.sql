@@ -1,6 +1,6 @@
--- Run in both Local and Cloud databases before deploying the API.
--- Existing project links are migrated to Client_ID, and the newest business style
--- for each client (highest Project_ID) is moved onto dbo.Clients.
+
+
+
 SET XACT_ABORT ON;
 
 BEGIN TRY

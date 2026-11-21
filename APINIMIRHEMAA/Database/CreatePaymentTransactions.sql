@@ -1,4 +1,4 @@
--- Run against the configured LocalDatabase before deploying the API.
+
 IF OBJECT_ID(N'dbo.JobOrder', N'U') IS NULL
     THROW 50020, 'Required table dbo.JobOrder was not found in the current database.', 1;
 

@@ -1,4 +1,4 @@
--- Run against each configured application database before deploying the API.
+
 IF OBJECT_ID(N'dbo.ServiceInvoiceFiles', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ServiceInvoiceFiles

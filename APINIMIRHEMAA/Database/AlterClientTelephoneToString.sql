@@ -1,4 +1,4 @@
--- Run this once against both the LocalDatabase and AzureDatabase before deploying the API.
+
 IF OBJECT_ID(N'dbo.Clients', N'U') IS NULL
     THROW 50000, 'dbo.Clients was not found in the current database.', 1;
 

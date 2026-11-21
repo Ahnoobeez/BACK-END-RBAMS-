@@ -1,4 +1,4 @@
--- Run once in both configured application databases before deploying the API.
+
 IF OBJECT_ID(N'dbo.ClientAccessGrants', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ClientAccessGrants

@@ -1,4 +1,4 @@
--- Run with client writes paused against each database that contains dbo.Clients.
+
 IF OBJECT_ID(N'dbo.Clients', N'U') IS NULL
     THROW 50004, 'Required table dbo.Clients was not found in the current database.', 1;
 
