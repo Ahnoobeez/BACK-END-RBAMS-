@@ -28,6 +28,10 @@ namespace APINIMIRHEMAA.Services
              IsWarehouse(from)) &&
             string.Equals(to?.Trim(), "Supplier", StringComparison.OrdinalIgnoreCase);
 
+        public static bool IsSupplierWarehouseReceipt(string? from, string? to) =>
+            string.Equals(from?.Trim(), "Supplier", StringComparison.OrdinalIgnoreCase) &&
+            IsWarehouse(to);
+
 
         public static string? CheckSameDepartment(string? from, string? to) =>
             !string.IsNullOrWhiteSpace(from) &&

@@ -152,9 +152,10 @@ namespace APINIMIRHEMAA.Services
                 }
 
                 var isAdminSupplierReturn = InventoryRules.IsAdminSupplierReturn(slip.FromWho, slip.ToWho);
-                if (autoApprove && !isAdminSupplierReturn)
+                var isSupplierWarehouseReceipt = InventoryRules.IsSupplierWarehouseReceipt(slip.FromWho, slip.ToWho);
+                if (autoApprove && !isAdminSupplierReturn && !isSupplierWarehouseReceipt)
                 {
-                    return new(0, $"{label}: the Admin module can automatically approve only Warehouse-to-Supplier returns.");
+                    return new(0, $"{label}: the Admin module can automatically approve only Supplier-to-Warehouse receipts or Warehouse-to-Supplier returns.");
                 }
 
                 var inventory = await db.Inventory
@@ -197,11 +198,19 @@ namespace APINIMIRHEMAA.Services
 
                 if (autoApprove)
                 {
-                    if (purchasedIssuePlan == null)
+                    if (isSupplierWarehouseReceipt)
+                    {
+                        inventory.Returned = (inventory.Returned ?? 0) + quantity;
+                        InventoryRules.Recalculate(inventory);
+                    }
+                    else if (purchasedIssuePlan != null)
+                    {
+                        InventoryRules.Apply(inventory, purchasedIssuePlan);
+                    }
+                    else
                     {
                         return new(0, $"{label}: the purchase receipt cannot be issued automatically.");
                     }
-                    InventoryRules.Apply(inventory, purchasedIssuePlan);
                 }
                 else
                 {
