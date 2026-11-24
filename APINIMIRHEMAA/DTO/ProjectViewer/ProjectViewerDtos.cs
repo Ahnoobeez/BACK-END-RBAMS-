@@ -44,6 +44,8 @@ namespace APINIMIRHEMAA.DTO.ProjectViewer
 
         public List<Quotation_Items> QuotationItems { get; init; } = new();
 
+        public List<QuotationFile> QuotationFiles { get; init; } = new();
+
         public List<ProjectViewerQuotationItemDto> Items { get; init; } = new();
     }
 

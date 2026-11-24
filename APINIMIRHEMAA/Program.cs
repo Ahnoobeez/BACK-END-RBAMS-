@@ -55,6 +55,10 @@ builder.Services.AddScoped<WorkflowService>();
 builder.Services.AddScoped<AccessPermissionService>();
 builder.Services.AddScoped<UserSessionService>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddHttpClient<GeminiQuotationAnalyzer>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(90);
+});
 builder.Services.AddScoped<AccessPermissionAuthorizationFilter>();
 builder.Services.AddSingleton<UndoOperationStore>();
 builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,

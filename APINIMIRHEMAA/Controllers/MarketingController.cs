@@ -31,16 +31,20 @@ namespace APINIMIRHEMAA.Controllers
 
         private readonly NotificationService _notificationService;
 
+        private readonly GeminiQuotationAnalyzer _geminiQuotationAnalyzer;
+
         public MarketingController(
             LocalDbContext Localcontext,
             CloudDbContext Cloudcontext,
             EncryptionService encryptionService,
-            NotificationService notificationService)
+            NotificationService notificationService,
+            GeminiQuotationAnalyzer geminiQuotationAnalyzer)
         {
             _Localdb = Localcontext;
             _CloudDb = Cloudcontext;
             _encryptionService = encryptionService;
             _notificationService = notificationService;
+            _geminiQuotationAnalyzer = geminiQuotationAnalyzer;
         }
 
 
@@ -3687,6 +3691,178 @@ namespace APINIMIRHEMAA.Controllers
             return NoContent();
         }
 
+
+        [HttpGet("GetLocalQuotationFiles")]
+        public async Task<ActionResult<List<QuotationFile>>> GetLocalQuotationFiles(
+            int quotationId,
+            CancellationToken cancellationToken)
+        {
+            if (quotationId <= 0)
+            {
+                return BadRequest("A valid quotation ID is required.");
+            }
+            if (!await _Localdb.Quotation
+                .AsNoTracking()
+                .AnyAsync(quotation => quotation.Quotation_ID == quotationId, cancellationToken))
+            {
+                return NotFound("The quotation was not found.");
+            }
+
+            var files = await _Localdb.QuotationFiles
+                .AsNoTracking()
+                .Where(file => file.Quotation_ID == quotationId)
+                .OrderBy(file => file.QuotationFile_ID)
+                .ToListAsync(cancellationToken);
+            foreach (var file in files)
+            {
+                file.FileData = _encryptionService.TryDecrypt(file.FileData);
+            }
+            return Ok(files);
+        }
+
+        [HttpPost("AnalyzeQuotationDocument")]
+        [RequestSizeLimit(4_000_000)]
+        public async Task<ActionResult<QuotationDocumentAnalysisDto>> AnalyzeQuotationDocument(
+            [FromBody] AnalyzeQuotationDocumentRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request == null)
+            {
+                return BadRequest("A quotation document is required.");
+            }
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var fileName = Path.GetFileName(request.FileName?.Trim() ?? string.Empty);
+            var extension = Path.GetExtension(fileName).ToLowerInvariant();
+            var expectedContentType = extension switch
+            {
+                ".pdf" => "application/pdf",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                _ => null
+            };
+            if (string.IsNullOrWhiteSpace(fileName) ||
+                expectedContentType == null ||
+                !string.Equals(
+                    request.ContentType,
+                    expectedContentType,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest("Upload a PDF, JPG, JPEG, or PNG document with a matching content type.");
+            }
+            if (string.IsNullOrWhiteSpace(request.FileData) || request.FileData.Length > 2_800_000)
+            {
+                return BadRequest("The document is empty or exceeds the 2 MB upload limit.");
+            }
+
+            byte[] fileData;
+            try
+            {
+                fileData = Convert.FromBase64String(request.FileData);
+            }
+            catch (FormatException)
+            {
+                return BadRequest("The document data is not valid base64.");
+            }
+            if (fileData.Length > 2_000_000)
+            {
+                return BadRequest("The document must not exceed 2 MB.");
+            }
+
+            var validationError = extension == ".pdf"
+                ? UploadValidator.ValidatePdf(fileData)
+                : UploadValidator.ValidateImage(fileData);
+            if (validationError != null)
+            {
+                return BadRequest(validationError);
+            }
+
+            try
+            {
+                var analysis = await _geminiQuotationAnalyzer.AnalyzeAsync(
+                    expectedContentType,
+                    fileData,
+                    cancellationToken);
+                return Ok(analysis);
+            }
+            catch (GeminiConfigurationException exception)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, exception.Message);
+            }
+            catch (GeminiQuotationAnalysisException exception)
+            {
+                return StatusCode(exception.StatusCode, exception.Message);
+            }
+        }
+
+        [HttpPost("AddLocalQuotationFilesBatch")]
+        [RequestSizeLimit(100_000_000)]
+        public async Task<ActionResult<List<int>>> AddLocalQuotationFilesBatch(
+            [FromBody] List<QuotationFile> files,
+            CancellationToken cancellationToken)
+        {
+            if (files == null || files.Count == 0)
+            {
+                return BadRequest("Select at least one quotation document.");
+            }
+
+            if (files.Any(file => file == null))
+            {
+                return BadRequest("Quotation document entries cannot be empty.");
+            }
+            var quotationIds = files.Select(file => file.Quotation_ID).Distinct().ToList();
+            if (quotationIds.Count != 1 || quotationIds[0] <= 0 ||
+                !await _Localdb.Quotation
+                    .AsNoTracking()
+                    .AnyAsync(quotation => quotation.Quotation_ID == quotationIds[0], cancellationToken))
+            {
+                return BadRequest("All documents must be linked to one accessible saved quotation.");
+            }
+
+            for (var index = 0; index < files.Count; index++)
+            {
+                var file = files[index];
+                var extension = file.FileExtension?.Trim().ToLowerInvariant() ?? string.Empty;
+                var fileName = Path.GetFileName(file.FileName?.Trim() ?? string.Empty);
+                if (string.IsNullOrWhiteSpace(fileName) ||
+                    fileName.Length > 255 ||
+                    string.IsNullOrWhiteSpace(extension) ||
+                    extension.Length > 16 ||
+                    !string.Equals(Path.GetExtension(fileName), extension, StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest($"File {index + 1} has invalid file details.");
+                }
+                if (file.FileData is not { Length: > 0 and <= 2_000_000 })
+                {
+                    return BadRequest($"File {index + 1} must not exceed 2 MB and cannot be empty.");
+                }
+
+                var validationError = extension == ".pdf"
+                    ? UploadValidator.ValidatePdf(file.FileData)
+                    : extension is ".jpg" or ".jpeg" or ".png"
+                        ? UploadValidator.ValidateImage(file.FileData)
+                        : "Only PDF, JPG, JPEG, and PNG files are supported.";
+                if (validationError != null)
+                {
+                    return BadRequest($"File {index + 1}: {validationError}");
+                }
+
+                file.FileName = fileName;
+                file.FileExtension = extension;
+                file.FileData = _encryptionService.Encrypt(file.FileData);
+                file.QuotationFile_ID = 0;
+                file.CreatedBy = null;
+                file.CreatedByUserId = null;
+                file.CreatedByDepartmentId = null;
+            }
+
+            _Localdb.QuotationFiles.AddRange(files);
+            await _Localdb.SaveChangesAsync(cancellationToken);
+            return Ok(files.Select(file => file.QuotationFile_ID).ToList());
+        }
 
         [HttpGet("GetLocalServiceInvoiceFiles")]
         public async Task<ActionResult<List<ServiceInvoiceFile>>> GetLocalServiceInvoiceFiles()

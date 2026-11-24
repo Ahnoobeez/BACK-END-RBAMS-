@@ -88,6 +88,7 @@ namespace APINIMIRHEMAA.Data
         public DbSet<ServiceInvoiceItem> ServiceInvoiceItems { get; set; }
 
         public DbSet<ServiceInvoiceFile> ServiceInvoiceFiles { get; set; }
+        public DbSet<QuotationFile> QuotationFiles { get; set; }
 
         public DbSet<Users> Users { get; set; }
 
@@ -197,7 +198,6 @@ namespace APINIMIRHEMAA.Data
             });
             modelBuilder.Entity<ServiceInvoiceFile>(entity =>
             {
-
                 entity.ToTable("ServiceInvoiceFiles");
                 entity.HasKey(file => file.ServiceInvoiceFile_ID);
                 entity.Property(file => file.FileData)
@@ -208,6 +208,19 @@ namespace APINIMIRHEMAA.Data
                     .HasForeignKey(file => file.JobOrderID)
                     .OnDelete(DeleteBehavior.Cascade);
                 entity.HasIndex(file => file.JobOrderID);
+            });
+            modelBuilder.Entity<QuotationFile>(entity =>
+            {
+                entity.ToTable("QuotationFiles");
+                entity.HasKey(file => file.QuotationFile_ID);
+                entity.Property(file => file.FileData)
+                    .HasColumnType("varbinary(max)")
+                    .IsRequired();
+                entity.HasOne<Quotation>()
+                    .WithMany()
+                    .HasForeignKey(file => file.Quotation_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(file => file.Quotation_ID);
             });
             modelBuilder.Entity<PaymentTransaction>(entity =>
             {

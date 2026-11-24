@@ -78,6 +78,16 @@ namespace APINIMIRHEMAA.Controllers
                 return NotFound("The requested quotation was not found.");
             }
 
+            var quotationFiles = await _localDb.QuotationFiles
+                .AsNoTracking()
+                .Where(file => file.Quotation_ID == quotationId)
+                .OrderBy(file => file.QuotationFile_ID)
+                .ToListAsync();
+            foreach (var file in quotationFiles)
+            {
+                file.FileData = _encryptionService.TryDecrypt(file.FileData);
+            }
+
             var client = await _localDb.Clients
                 .AsNoTracking()
                 .FirstOrDefaultAsync(record => record.Client_ID == quotation.Client_ID);
@@ -355,6 +365,7 @@ namespace APINIMIRHEMAA.Controllers
                 InstallationReports = installationReports,
                 QuotationStores = stores,
                 QuotationItems = quotationItems,
+                QuotationFiles = quotationFiles,
                 Items = items
             });
         }
