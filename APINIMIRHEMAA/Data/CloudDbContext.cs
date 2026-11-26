@@ -83,6 +83,17 @@ namespace APINIMIRHEMAA.Data
         {
             EncryptedDataMapping.ConfigureClients(modelBuilder, _encryptionService);
 
+            modelBuilder.Entity<AuditTrail>(entity =>
+            {
+                entity.HasIndex(audit => audit.User_ID)
+                    .HasDatabaseName("IX_AuditTrail_User_ID");
+                entity.HasOne<Users>()
+                    .WithMany()
+                    .HasForeignKey(audit => audit.User_ID)
+                    .OnDelete(DeleteBehavior.SetNull)
+                    .HasConstraintName("FK_AuditTrail_Users_User_ID");
+            });
+
             modelBuilder.Entity<ClientAccessGrant>(entity =>
             {
 

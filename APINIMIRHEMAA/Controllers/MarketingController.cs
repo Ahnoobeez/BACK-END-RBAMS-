@@ -22,6 +22,7 @@ namespace APINIMIRHEMAA.Controllers
 
     public class MarketingController : ControllerBase
     {
+        private const int MaxQuotationFilesPerQuotation = 10;
 
         private LocalDbContext _Localdb;
 
@@ -3808,6 +3809,10 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest("Select at least one quotation document.");
             }
+            if (files.Count > MaxQuotationFilesPerQuotation)
+            {
+                return BadRequest($"A quotation may have no more than {MaxQuotationFilesPerQuotation} attached documents.");
+            }
 
             if (files.Any(file => file == null))
             {
@@ -3820,6 +3825,24 @@ namespace APINIMIRHEMAA.Controllers
                     .AnyAsync(quotation => quotation.Quotation_ID == quotationIds[0], cancellationToken))
             {
                 return BadRequest("All documents must be linked to one accessible saved quotation.");
+            }
+
+            var existingFileExtensions = await _Localdb.QuotationFiles
+                .AsNoTracking()
+                .Where(file => file.Quotation_ID == quotationIds[0])
+                .Select(file => file.FileExtension)
+                .ToListAsync(cancellationToken);
+            if (existingFileExtensions.Count + files.Count > MaxQuotationFilesPerQuotation)
+            {
+                return BadRequest($"A quotation may have no more than {MaxQuotationFilesPerQuotation} attached documents.");
+            }
+            var existingPdfCount = existingFileExtensions.Count(extension =>
+                string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase));
+            var incomingPdfCount = files.Count(file =>
+                string.Equals(file.FileExtension?.Trim(), ".pdf", StringComparison.OrdinalIgnoreCase));
+            if (existingPdfCount + incomingPdfCount > 1)
+            {
+                return BadRequest("A quotation may have no more than one PDF document.");
             }
 
             for (var index = 0; index < files.Count; index++)

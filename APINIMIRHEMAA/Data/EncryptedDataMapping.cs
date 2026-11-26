@@ -34,6 +34,24 @@ namespace APINIMIRHEMAA.Data
                 .HasColumnType("nvarchar(max)");
         }
 
+        public static void ConfigureClientQuotationRequests(
+            ModelBuilder modelBuilder,
+            EncryptionService encryptionService)
+        {
+            var request = modelBuilder.Entity<ClientQuotationRequest>();
+            ConfigureEncryptedString(request.Property(item => item.Client_Name), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.Client_Telephone), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.Contact_Person), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.Business_Style), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.Client_EmailAddress), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.TermsAndCondition), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.Company_Address), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.TIN), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.Payment_Terms), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.Project_Title), encryptionService);
+            ConfigureEncryptedString(request.Property(item => item.Items_Json), encryptionService);
+        }
+
 
 
         public static void ConfigureLocalRecords(ModelBuilder modelBuilder, EncryptionService encryptionService)

@@ -1414,6 +1414,7 @@ namespace APINIMIRHEMAA.Controllers
             };
             _Localdb.AuditTrail.Add(new AuditTrail
             {
+                User_ID = _Localdb.CurrentUserId,
                 Name = _Localdb.GetCurrentEmployeeName(),
                 Date = DateOnly.FromDateTime(now),
                 Time = TimeOnly.FromDateTime(now),

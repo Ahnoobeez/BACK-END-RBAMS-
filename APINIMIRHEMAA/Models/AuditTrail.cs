@@ -9,6 +9,8 @@ namespace APINIMIRHEMAA.Models
 
         public int AuditTrail_ID { get; set; }
 
+        public int? User_ID { get; set; }
+
         public string? Name { get; set; }
 
         public DateOnly? Date { get; set; }

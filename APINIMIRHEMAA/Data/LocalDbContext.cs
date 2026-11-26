@@ -39,6 +39,10 @@ namespace APINIMIRHEMAA.Data
 
         public DbSet<ClientEntity> Clients { get; set; }
 
+        public DbSet<ClientQuotationRequest> ClientQuotationRequests { get; set; }
+
+        public DbSet<ClientQuotationRequestGraphic> ClientQuotationRequestGraphics { get; set; }
+
         public DbSet<ClientAccessGrant> ClientAccessGrants { get; set; }
 
         public DbSet<Quotation> Quotation { get; set; }
@@ -136,6 +140,7 @@ namespace APINIMIRHEMAA.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             EncryptedDataMapping.ConfigureClients(modelBuilder, _encryptionService);
+            EncryptedDataMapping.ConfigureClientQuotationRequests(modelBuilder, _encryptionService);
             EncryptedDataMapping.ConfigureLocalRecords(modelBuilder, _encryptionService);
 
             modelBuilder.Entity<UserSession>(entity =>
@@ -156,6 +161,17 @@ namespace APINIMIRHEMAA.Data
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
+            modelBuilder.Entity<AuditTrail>(entity =>
+            {
+                entity.HasIndex(audit => audit.User_ID)
+                    .HasDatabaseName("IX_AuditTrail_User_ID");
+                entity.HasOne<Users>()
+                    .WithMany()
+                    .HasForeignKey(audit => audit.User_ID)
+                    .OnDelete(DeleteBehavior.SetNull)
+                    .HasConstraintName("FK_AuditTrail_Users_User_ID");
+            });
+
             modelBuilder.Entity<ClientAccessGrant>(entity =>
             {
 
@@ -163,6 +179,46 @@ namespace APINIMIRHEMAA.Data
                 entity.HasKey(grant => new { grant.Client_ID, grant.User_ID });
                 entity.Property(grant => grant.GrantedAtUtc)
                     .HasDefaultValueSql("SYSUTCDATETIME()");
+            });
+            modelBuilder.Entity<ClientQuotationRequest>(entity =>
+            {
+                entity.ToTable("ClientQuotationRequests");
+                entity.HasKey(request => request.Request_ID);
+                entity.Property(request => request.Request_ID)
+                    .ValueGeneratedOnAdd();
+                entity.Property(request => request.SubmittedAtUtc)
+                    .HasColumnType("datetime2")
+                    .HasDefaultValueSql("SYSUTCDATETIME()");
+                entity.Property(request => request.Status)
+                    .HasMaxLength(32)
+                    .IsRequired();
+                entity.Property(request => request.Sub_Total)
+                    .HasColumnType("decimal(18,2)");
+                entity.Property(request => request.Delivery_Charge)
+                    .HasColumnType("decimal(18,2)");
+                entity.Property(request => request.Installation_Charge)
+                    .HasColumnType("decimal(18,2)");
+                entity.Property(request => request.VAT)
+                    .HasColumnType("decimal(18,2)");
+                entity.Property(request => request.Overall_Total)
+                    .HasColumnType("decimal(18,2)");
+                entity.HasIndex(request => new { request.Status, request.SubmittedAtUtc });
+                entity.HasIndex(request => request.ClaimedByUserId);
+            });
+            modelBuilder.Entity<ClientQuotationRequestGraphic>(entity =>
+            {
+                entity.ToTable("ClientQuotationRequestGraphics");
+                entity.HasKey(graphic => graphic.RequestGraphic_ID);
+                entity.Property(graphic => graphic.RequestGraphic_ID)
+                    .ValueGeneratedOnAdd();
+                entity.Property(graphic => graphic.FileData)
+                    .HasColumnType("varbinary(max)")
+                    .IsRequired();
+                entity.HasOne<ClientQuotationRequest>()
+                    .WithMany()
+                    .HasForeignKey(graphic => graphic.Request_ID)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(graphic => graphic.Request_ID);
             });
             modelBuilder.Entity<ClientQuotationSequence>(entity =>
             {
@@ -693,6 +749,8 @@ namespace APINIMIRHEMAA.Data
                     entry.Entity is not APINIMIRHEMAA.Models.AuditTrail &&
                     entry.Entity is not APINIMIRHEMAA.Models.ClientQuotationSequence &&
                     entry.Entity is not APINIMIRHEMAA.Models.ClientQuotationReservation &&
+                    entry.Entity is not APINIMIRHEMAA.Models.ClientQuotationRequest &&
+                    entry.Entity is not APINIMIRHEMAA.Models.ClientQuotationRequestGraphic &&
                     (entry.State == EntityState.Added ||
                      entry.State == EntityState.Modified ||
                      entry.State == EntityState.Deleted))
@@ -982,6 +1040,8 @@ namespace APINIMIRHEMAA.Data
                          .Where(e => e.Entity is not APINIMIRHEMAA.Models.AuditTrail &&
                          e.Entity is not APINIMIRHEMAA.Models.ClientQuotationSequence &&
                          e.Entity is not APINIMIRHEMAA.Models.ClientQuotationReservation &&
+                         e.Entity is not APINIMIRHEMAA.Models.ClientQuotationRequest &&
+                         e.Entity is not APINIMIRHEMAA.Models.ClientQuotationRequestGraphic &&
                          e.Entity is not UserSecurityAnswer &&
                          (e.State == EntityState.Added ||
                           e.State == EntityState.Modified ||
@@ -1409,6 +1469,7 @@ namespace APINIMIRHEMAA.Data
             if (pending.Count == 0) return new();
 
             var (name, department) = ResolveActor();
+            var currentUserId = CurrentUserId;
 
             var now = DateTime.Now;
 
@@ -1469,6 +1530,7 @@ namespace APINIMIRHEMAA.Data
 
                 return new AuditTrail
                 {
+                    User_ID = currentUserId,
                     Name = actorName,
                     Date = DateOnly.FromDateTime(now),
                     Time = TimeOnly.FromDateTime(now),

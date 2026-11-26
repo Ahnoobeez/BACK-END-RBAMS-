@@ -134,6 +134,16 @@ namespace APINIMIRHEMAA.Controllers
                     quotation.Start_Date
                 })
                 .ToListAsync(cancellationToken);
+            var quotationIdsWithConforme = (await _localDb.Conforme
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Select(conforme => conforme.Quotation_ID)
+                .Distinct()
+                .ToListAsync(cancellationToken))
+                .ToHashSet();
+            var accountsPayableTotal = quotations
+                .Where(quotation => quotationIdsWithConforme.Contains(quotation.Quotation_ID))
+                .Sum(quotation => quotation.Overall_Total);
             var jobs = await _localDb.JobOrder
                 .IgnoreQueryFilters()
                 .AsNoTracking()
@@ -144,6 +154,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 clients = clientRows,
                 quotations,
+                accountsPayableTotal,
                 jobs
             });
         }

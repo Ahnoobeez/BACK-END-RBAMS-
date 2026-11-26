@@ -1353,6 +1353,7 @@ namespace APINIMIRHEMAA.Controllers
             {
                 return BadRequest(ModelState);
             }
+            auditTrail.User_ID = _Localdb.CurrentUserId;
             _Localdb.Add(auditTrail);
 
             _Localdb.SaveChanges();
